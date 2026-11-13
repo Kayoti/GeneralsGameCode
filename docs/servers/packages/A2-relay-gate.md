@@ -33,7 +33,7 @@ Anything outside `Servers/Relay/`.
 - [x] A hook exists where A3 plugs in the VPN check before the measurement. Until A3, the hook allows everyone. Evidence: `VpnCheckPasses` in `entry_check.cpp` is called in `RelayHost::OnCheckHello` before `PingRound::Start`; unit test `TestVpnHookAllowsEveryoneForNow`.
 - [x] Entry checks are limited per source address as PROTOCOL.md 6 states. Above the limit: `REFUSE` `RATE_LIMITED`. Evidence: live runs, the 8th check from 127.0.0.1 printed `REFUSE RATE_LIMITED (code 19)` after six accepted; unit test `TestAddressRateLimit`.
 - [x] A small command-line test client in `Servers/Relay/tools/` runs the entry check and prints the result. It is used by the Phase 1 gate. Evidence: `tools/entry_check_client.cpp` builds as `entry_check_client.exe` and was used for every live case above.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -69,5 +69,9 @@ VPN data (A3). Sessions (A4).
   - The test client sends `exe_crc` 1 and `ini_crc` 2. Real values come from C1.
   - PROTOCOL.md section 10: no assumption in it applies to A2. V1 to V8 belong to C1, C2, D2, 2.1 and A5.
   - Not verified: a real game client (C1 is not done), a flood from many addresses, and real network latency. The pass signature is checked only by the unit test, not by an external verifier.
-- Review findings and fixes:
+- Review findings and fixes: reviewed by a second developer. Verdict: approved, no changes required. All three findings are low.
+  - The `entry_check_client` usage text omits `--trace`. Cosmetic, in a developer tool only; left as is.
+  - Every entry check waits the full 4-second window even when all 8 PONGs arrive sooner. This matches PROTOCOL 4.4 (it states a 4-second window); whether to end early is a later UX choice, not a defect.
+  - An unexpected but valid-length message after the first one logs one line per packet; this is the existing A1 pattern and adds no new unbounded log. Tightening the relay's logging belongs to A6.
+  - Confirmed correct by the reviewer, with a live run on localhost (PROTO_MISMATCH, PING_TOO_HIGH with rtt/limit, PASS, TIMEOUT, RATE_LIMITED): the 8-ping schedule and own-clock median; unknown/duplicate PONG nonces ignored; the issued pass passes CheckPass and matches 4.3 at 100 bytes; REFUSE codes (PROTO_MISMATCH 1, RATE_LIMITED 19) match 4.9; the `wire.h` extraction is byte-identical and weakens no check; scope is `Servers/Relay/` only; connection ids and no IPs are logged; timing is wrap-safe.
   - Pending: reviewer other than the author.
