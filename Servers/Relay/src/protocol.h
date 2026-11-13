@@ -97,4 +97,33 @@ const std::size_t MAX_MESSAGE_SIZE = 16384; // DATA message limit (PROTOCOL.md 6
 // peer slots in addition to SLOT_COUNT for every allowed session.
 const std::size_t MAX_UNCHECKED_CONNECTIONS = 256;
 
+// Match records (PROTOCOL.md 4.6 and 6).
+const std::size_t MIN_RECORD_SIZE = 7;
+const std::size_t MAX_RECORD_SIZE = 4096;
+const std::uint32_t INITIAL_NEXT_FRAME =
+    30;                                 // The engine starts with a run-ahead of 30 and treats frames 1 to 29 as empty.
+const std::uint32_t FRAME_WINDOW = 128; // F may be next_frame to next_frame + FRAME_WINDOW.
+const std::size_t FAILED_RECORDS_BEFORE_DROP = 32;
+const std::uint32_t DATA_RATE_WINDOW_MS = 1000;
+const std::size_t MAX_DATA_BYTES_PER_SECOND = 64 * 1024;
+const std::size_t MAX_RECORDS_PER_SECOND = 600;
+const std::uint16_t MIN_RUN_AHEAD = 4;
+const std::uint16_t MAX_RUN_AHEAD = 64;
+const std::uint8_t MIN_FRAME_RATE = 5;
+const std::uint8_t MAX_FRAME_RATE = 60;
+
+// Command types the relay carries. The values are the engine's NetCommandType values, which are the byte after the
+// 'T' tag of a record (NetworkDefs.h).
+enum CommandType : std::uint8_t {
+  COMMAND_FRAMEINFO = 3,
+  COMMAND_GAMECOMMAND = 4,
+  COMMAND_PLAYERLEAVE = 5,
+  COMMAND_RUNAHEADMETRICS = 6,
+  COMMAND_RUNAHEAD = 7,
+  COMMAND_CHAT = 11,
+  COMMAND_PROGRESS = 14,
+  COMMAND_LOADCOMPLETE = 15,
+  COMMAND_TIMEOUTSTART = 16,
+};
+
 } // namespace relay

@@ -83,11 +83,14 @@ add_library(relay_core STATIC
     src/host.cpp
     src/host.h
     src/log.h
+    src/match_data.cpp
     src/pass.cpp
     src/pass.h
     src/protocol.h
     src/rate_limit.cpp
     src/rate_limit.h
+    src/records.cpp
+    src/records.h
     src/region_keys.cpp
     src/region_keys.h
     src/sessions.cpp

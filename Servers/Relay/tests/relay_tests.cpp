@@ -5,6 +5,7 @@
 #include "pass.h"
 #include "protocol.h"
 #include "rate_limit.h"
+#include "records.h"
 #include "region_keys.h"
 #include "sessions.h"
 #include "wire.h"
@@ -421,7 +422,10 @@ struct SessionFixture {
   std::uint32_t m_now_ms = 100000;
   std::uint64_t m_next_pass_id = 1;
 
-  explicit SessionFixture(const relay::RegionKey &key, std::size_t max_sessions = 200) : m_key(key) {
+  explicit SessionFixture(const relay::RegionKey &key, std::size_t max_sessions = 200,
+                          const relay::RecordSettings &records = relay::RecordSettings())
+      : m_key(key) {
+    m_settings.records = records;
     m_settings.public_key = m_key.public_key;
     m_settings.region = 1;
     m_settings.check_address = false;
@@ -917,6 +921,737 @@ void TestRandomValuesDiffer(const relay::RegionKey &key) {
   }
 }
 
+// Bytes of the tags T F R P C D of a GAMECOMMAND, which is the header the tests use for large records.
+const std::size_t GAME_COMMAND_HEADER_SIZE = 15;
+
+// ---- Match records (PROTOCOL.md 4.6) ----
+
+void AppendU32(std::vector<unsigned char> &out, std::uint32_t value) {
+  unsigned char bytes[4];
+  relay::PutU32(bytes, value);
+  out.insert(out.end(), bytes, bytes + 4);
+}
+
+// A record with the given tag order after T, for example "FRPCD". Every tag is written with the given value.
+std::vector<unsigned char> BuildRecord(const char *order, unsigned type, unsigned relay_mask, std::uint32_t frame,
+                                       unsigned player, const std::vector<unsigned char> &data) {
+  std::vector<unsigned char> record;
+  record.push_back('T');
+  record.push_back(static_cast<unsigned char>(type));
+  for (const char *tag = order; *tag != '\0'; ++tag) {
+    record.push_back(static_cast<unsigned char>(*tag));
+    switch (*tag) {
+    case 'R':
+      record.push_back(static_cast<unsigned char>(relay_mask));
+      break;
+    case 'F':
+      AppendU32(record, frame);
+      break;
+    case 'P':
+      record.push_back(static_cast<unsigned char>(player));
+      break;
+    case 'C':
+      record.push_back(0x34);
+      record.push_back(0x12);
+      break;
+    default:
+      break;
+    }
+  }
+  record.insert(record.end(), data.begin(), data.end());
+  return record;
+}
+
+std::vector<unsigned char> GameCommand(unsigned player, std::uint32_t frame, std::size_t extra = 0) {
+  return BuildRecord("FRPCD", relay::COMMAND_GAMECOMMAND, 0xFF, frame, player, std::vector<unsigned char>(extra, 0xAB));
+}
+
+std::vector<unsigned char> FrameInfo(unsigned player, std::uint32_t frame, std::uint16_t count) {
+  std::vector<unsigned char> data(2);
+  relay::PutU16(data.data(), count);
+  return BuildRecord("FRPCD", relay::COMMAND_FRAMEINFO, 0xFF, frame, player, data);
+}
+
+std::vector<unsigned char> PlayerLeave(unsigned player, std::uint32_t frame, unsigned leaving) {
+  return BuildRecord("RFPCD", relay::COMMAND_PLAYERLEAVE, 0xFF, frame, player,
+                     std::vector<unsigned char>(1, static_cast<unsigned char>(leaving)));
+}
+
+std::vector<unsigned char> RunAhead(unsigned player, std::uint32_t frame, std::uint16_t run_ahead, unsigned frame_rate,
+                                    unsigned relay_mask = 0xFF) {
+  std::vector<unsigned char> data(3);
+  relay::PutU16(data.data(), run_ahead);
+  data.at(2) = static_cast<unsigned char>(frame_rate);
+  return BuildRecord("RFPCD", relay::COMMAND_RUNAHEAD, relay_mask, frame, player, data);
+}
+
+std::vector<unsigned char> Chat(unsigned player, unsigned relay_mask) {
+  return BuildRecord("FRPCD", relay::COMMAND_CHAT, relay_mask, 0, player, std::vector<unsigned char>(5, 0x55));
+}
+
+std::vector<unsigned char> Simple(unsigned type, unsigned player) {
+  return BuildRecord("RPCD", type, 0xFF, 0, player, std::vector<unsigned char>());
+}
+
+std::vector<unsigned char> Progress(unsigned player) {
+  return BuildRecord("RPD", relay::COMMAND_PROGRESS, 0xFF, 0, player, std::vector<unsigned char>());
+}
+
+// A DATA message body (without the type byte): each record with its length prefix.
+std::vector<unsigned char> DataBody(const std::vector<std::vector<unsigned char>> &records) {
+  std::vector<unsigned char> body;
+  for (const std::vector<unsigned char> &record : records) {
+    body.push_back(static_cast<unsigned char>(record.size() & 0xFF));
+    body.push_back(static_cast<unsigned char>(record.size() >> 8));
+    body.insert(body.end(), record.begin(), record.end());
+  }
+  return body;
+}
+
+// The records inside the DATA messages a connection received, in order.
+std::vector<std::vector<unsigned char>> ReceivedRecords(const RecordingOutput &output, std::uint32_t connection) {
+  std::vector<std::vector<unsigned char>> records;
+  for (const std::vector<unsigned char> &message : output.For(connection)) {
+    if (message.at(0) != relay::MSG_DATA) {
+      continue;
+    }
+    std::size_t position = 1;
+    while (position < message.size()) {
+      std::size_t length = relay::GetU16(message.data() + position);
+      position += 2;
+      records.emplace_back(message.begin() + static_cast<std::ptrdiff_t>(position),
+                           message.begin() + static_cast<std::ptrdiff_t>(position + length));
+      position += length;
+    }
+  }
+  return records;
+}
+
+// Messages other than DATA that a connection received.
+std::vector<std::vector<unsigned char>> ControlMessages(const RecordingOutput &output, std::uint32_t connection) {
+  std::vector<std::vector<unsigned char>> messages;
+  for (const std::vector<unsigned char> &message : output.For(connection)) {
+    if (message.at(0) != relay::MSG_DATA) {
+      messages.push_back(message);
+    }
+  }
+  return messages;
+}
+
+// A session of slots 0 (host, connection 1), 1 (connection 2) and 2 (connection 3), not started yet.
+struct MatchFixture {
+  SessionFixture m_fixture;
+  relay::SessionManager m_manager;
+  Created m_created;
+
+  explicit MatchFixture(const relay::RegionKey &key, const relay::RecordSettings &records = relay::RecordSettings())
+      : m_fixture(key, 200, records), m_manager(m_fixture.m_settings, m_fixture.m_output) {
+    EXPECT_TRUE(MakeSession(m_fixture, m_manager, 0x07, 0, m_created, 1));
+    Join(m_fixture, m_manager, 2, m_created, 1, m_created.m_tokens[1]);
+  }
+
+  void Start() {
+    Join(m_fixture, m_manager, 3, m_created, 2, m_created.m_tokens[2]);
+    m_fixture.m_output.Clear();
+  }
+
+  // Slot n has connection n + 1.
+  void Send(unsigned slot, const std::vector<std::vector<unsigned char>> &records, std::uint32_t advance_ms = 0) {
+    m_fixture.m_now_ms += advance_ms;
+    std::vector<unsigned char> body = DataBody(records);
+    m_manager.OnData(slot + 1, m_fixture.m_now_ms, body.data(), body.size());
+  }
+
+  std::size_t Received(unsigned slot) const {
+    return ReceivedRecords(m_fixture.m_output, slot + 1).size();
+  }
+};
+
+void TestScanAcceptsEachType() {
+  struct Case {
+    std::vector<unsigned char> m_record;
+    unsigned m_type;
+  };
+  const Case CASES[] = {
+      {GameCommand(1, 30), relay::COMMAND_GAMECOMMAND},
+      {FrameInfo(1, 30, 0), relay::COMMAND_FRAMEINFO},
+      {PlayerLeave(1, 30, 1), relay::COMMAND_PLAYERLEAVE},
+      {RunAhead(1, 30, 10, 30), relay::COMMAND_RUNAHEAD},
+      {BuildRecord("RPCD", relay::COMMAND_RUNAHEADMETRICS, 1, 0, 1, std::vector<unsigned char>()),
+       relay::COMMAND_RUNAHEADMETRICS},
+      {Chat(1, 0xFF), relay::COMMAND_CHAT},
+      {Simple(relay::COMMAND_LOADCOMPLETE, 1), relay::COMMAND_LOADCOMPLETE},
+      {Simple(relay::COMMAND_TIMEOUTSTART, 1), relay::COMMAND_TIMEOUTSTART},
+      {Progress(1), relay::COMMAND_PROGRESS},
+  };
+  for (const Case &test : CASES) {
+    relay::RecordHeader header;
+    EXPECT_EQ(relay::ScanRecord(test.m_record.data(), test.m_record.size(), header), relay::FAULT_NONE);
+    EXPECT_EQ(header.m_type, test.m_type);
+    EXPECT_EQ(header.m_player, 1);
+  }
+
+  relay::RecordHeader header;
+  std::vector<unsigned char> frame_info = FrameInfo(3, 77, 513);
+  EXPECT_EQ(relay::ScanRecord(frame_info.data(), frame_info.size(), header), relay::FAULT_NONE);
+  EXPECT_EQ(header.m_frame, 77u);
+  EXPECT_EQ(header.m_player, 3);
+  EXPECT_EQ(header.m_command_count, 513);
+  std::vector<unsigned char> run_ahead = RunAhead(2, 31, 22, 25, 0x05);
+  EXPECT_EQ(relay::ScanRecord(run_ahead.data(), run_ahead.size(), header), relay::FAULT_NONE);
+  EXPECT_EQ(header.m_run_ahead, 22);
+  EXPECT_EQ(header.m_frame_rate, 25);
+  EXPECT_EQ(header.m_relay, 0x05);
+  EXPECT_EQ(header.m_frame, 31u);
+  std::vector<unsigned char> leave = PlayerLeave(2, 40, 6);
+  EXPECT_EQ(relay::ScanRecord(leave.data(), leave.size(), header), relay::FAULT_NONE);
+  EXPECT_EQ(header.m_leaving_slot, 6);
+}
+
+void TestScanLengthLimits() {
+  relay::RecordHeader header;
+  // PROGRESS is the shortest record, 7 bytes.
+  std::vector<unsigned char> progress = Progress(0);
+  EXPECT_EQ(progress.size(), relay::MIN_RECORD_SIZE);
+  EXPECT_EQ(relay::ScanRecord(progress.data(), progress.size(), header), relay::FAULT_NONE);
+  EXPECT_EQ(relay::ScanRecord(progress.data(), progress.size() - 1, header), relay::FAULT_BAD_LENGTH);
+  EXPECT_EQ(relay::ScanRecord(progress.data(), 0, header), relay::FAULT_BAD_LENGTH);
+
+  // GAMECOMMAND has a 15 byte header. Its data fills the record up to 4096 bytes.
+  std::vector<unsigned char> largest = GameCommand(0, 30, relay::MAX_RECORD_SIZE - GAME_COMMAND_HEADER_SIZE);
+  EXPECT_EQ(largest.size(), relay::MAX_RECORD_SIZE);
+  EXPECT_EQ(relay::ScanRecord(largest.data(), largest.size(), header), relay::FAULT_NONE);
+  std::vector<unsigned char> too_long = GameCommand(0, 30, relay::MAX_RECORD_SIZE - GAME_COMMAND_HEADER_SIZE + 1);
+  EXPECT_EQ(relay::ScanRecord(too_long.data(), too_long.size(), header), relay::FAULT_BAD_LENGTH);
+}
+
+void TestScanHeaderRules() {
+  relay::RecordHeader header;
+  const std::vector<unsigned char> DATA2(2, 1);
+
+  // Every proper prefix of a header, as a record of that shorter length, is refused and never read past.
+  const std::vector<std::vector<unsigned char>> RECORDS = {
+      GameCommand(1, 30),
+      FrameInfo(1, 30, 0),
+      PlayerLeave(1, 30, 1),
+      RunAhead(1, 30, 8, 30),
+      BuildRecord("FRPCD", relay::COMMAND_CHAT, 0xFF, 30, 1, std::vector<unsigned char>()),
+      Simple(relay::COMMAND_LOADCOMPLETE, 1),
+      Progress(1),
+  };
+  for (const std::vector<unsigned char> &record : RECORDS) {
+    for (std::size_t length = 0; length < record.size(); ++length) {
+      std::vector<unsigned char> exact(record.begin(), record.begin() + static_cast<std::ptrdiff_t>(length));
+      relay::RecordFault fault = relay::ScanRecord(exact.data(), exact.size(), header);
+      EXPECT_TRUE(fault != relay::FAULT_NONE);
+    }
+  }
+
+  // A record that does not start with T.
+  std::vector<unsigned char> record = GameCommand(1, 30);
+  record.at(0) = 'X';
+  EXPECT_EQ(relay::ScanRecord(record.data(), record.size(), header), relay::FAULT_BAD_HEADER);
+
+  // Unknown types, among them ones the relay does not carry (ACKBOTH 0, KEEPALIVE 9, DISCONNECTCHAT 10, FILE 18).
+  const unsigned UNKNOWN[] = {0, 1, 2, 8, 9, 10, 12, 13, 17, 18, 21, 22, 30, 31, 255};
+  for (unsigned type : UNKNOWN) {
+    std::vector<unsigned char> unknown = BuildRecord("FRPCD", type, 0xFF, 30, 1, DATA2);
+    EXPECT_EQ(relay::ScanRecord(unknown.data(), unknown.size(), header), relay::FAULT_UNKNOWN_TYPE);
+  }
+
+  // Wrong order, repeated tag, missing tag, extra tag and the repeat tag Z.
+  std::vector<unsigned char> swapped = BuildRecord("RFPCD", relay::COMMAND_GAMECOMMAND, 0xFF, 30, 1, DATA2);
+  EXPECT_EQ(relay::ScanRecord(swapped.data(), swapped.size(), header), relay::FAULT_BAD_HEADER);
+  std::vector<unsigned char> swapped2 = BuildRecord("FRPCD", relay::COMMAND_PLAYERLEAVE, 0xFF, 30, 1, DATA2);
+  EXPECT_EQ(relay::ScanRecord(swapped2.data(), swapped2.size(), header), relay::FAULT_BAD_HEADER);
+  std::vector<unsigned char> repeated = BuildRecord("FRPPCD", relay::COMMAND_GAMECOMMAND, 0xFF, 30, 1, DATA2);
+  EXPECT_EQ(relay::ScanRecord(repeated.data(), repeated.size(), header), relay::FAULT_BAD_HEADER);
+  std::vector<unsigned char> missing = BuildRecord("FRCD", relay::COMMAND_GAMECOMMAND, 0xFF, 30, 1, DATA2);
+  EXPECT_EQ(relay::ScanRecord(missing.data(), missing.size(), header), relay::FAULT_BAD_HEADER);
+  std::vector<unsigned char> extra = BuildRecord("FRPCFD", relay::COMMAND_GAMECOMMAND, 0xFF, 30, 1, DATA2);
+  EXPECT_EQ(relay::ScanRecord(extra.data(), extra.size(), header), relay::FAULT_BAD_HEADER);
+  std::vector<unsigned char> repeat_tag = GameCommand(1, 30, 4);
+  repeat_tag.at(2) = 'Z';
+  EXPECT_EQ(relay::ScanRecord(repeat_tag.data(), repeat_tag.size(), header), relay::FAULT_BAD_HEADER);
+  std::vector<unsigned char> progress_with_frame = BuildRecord("RFPD", relay::COMMAND_PROGRESS, 0xFF, 30, 1, DATA2);
+  EXPECT_EQ(relay::ScanRecord(progress_with_frame.data(), progress_with_frame.size(), header), relay::FAULT_BAD_HEADER);
+
+  // The data tag is the last tag. A record that ends before it, or has no data the relay reads, is refused.
+  std::vector<unsigned char> no_marker = BuildRecord("FRPC", relay::COMMAND_GAMECOMMAND, 0xFF, 30, 1, DATA2);
+  EXPECT_EQ(relay::ScanRecord(no_marker.data(), no_marker.size(), header), relay::FAULT_BAD_HEADER);
+  std::vector<unsigned char> short_count =
+      BuildRecord("FRPCD", relay::COMMAND_FRAMEINFO, 0xFF, 30, 1, std::vector<unsigned char>(1, 0));
+  EXPECT_EQ(relay::ScanRecord(short_count.data(), short_count.size(), header), relay::FAULT_BAD_DATA);
+  std::vector<unsigned char> short_run_ahead =
+      BuildRecord("RFPCD", relay::COMMAND_RUNAHEAD, 0xFF, 30, 1, std::vector<unsigned char>(2, 8));
+  EXPECT_EQ(relay::ScanRecord(short_run_ahead.data(), short_run_ahead.size(), header), relay::FAULT_BAD_DATA);
+  std::vector<unsigned char> no_leaver = PlayerLeave(1, 30, 1);
+  no_leaver.pop_back();
+  EXPECT_EQ(relay::ScanRecord(no_leaver.data(), no_leaver.size(), header), relay::FAULT_BAD_DATA);
+}
+
+void TestScanReadsOnlyInsideRecord() {
+  // The record sits at the end of a buffer whose following bytes would complete it. A scan that read past the
+  // record would accept it. The tag D is the last byte, so a FRAMEINFO has no data inside the record.
+  std::vector<unsigned char> buffer = FrameInfo(1, 30, 5);
+  std::vector<unsigned char> cut(buffer.begin(), buffer.end() - 2);
+  std::vector<unsigned char> padded = cut;
+  padded.push_back(7);
+  padded.push_back(7);
+  relay::RecordHeader header;
+  EXPECT_EQ(relay::ScanRecord(padded.data(), cut.size(), header), relay::FAULT_BAD_DATA);
+
+  // A tag value that would need bytes past the end: the F tag with 3 of its 4 bytes inside the record.
+  std::vector<unsigned char> partial = {'T', relay::COMMAND_PLAYERLEAVE, 'R', 0xFF, 'F', 1, 0, 0};
+  padded = partial;
+  padded.resize(40, 0);
+  EXPECT_EQ(relay::ScanRecord(padded.data(), partial.size(), header), relay::FAULT_BAD_HEADER);
+}
+
+void TestDataBeforeStartDropsPlayer(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.m_fixture.m_output.Clear();
+  match.Send(1, {Progress(1)});
+  // Slot 1 is dropped: DROP then ROSTER to the host, and its connection is closed.
+  EXPECT_TRUE(match.m_fixture.m_output.WasClosed(2));
+  std::vector<std::vector<unsigned char>> host = match.m_fixture.m_output.For(1);
+  EXPECT_EQ(host.size(), 2u);
+  EXPECT_EQ(host.at(0).at(0), relay::MSG_DROP);
+  EXPECT_EQ(host.at(0).at(1), 1);
+  EXPECT_EQ(host.at(0).at(2), relay::DROP_PROTOCOL);
+  EXPECT_EQ(relay::GetU32(host.at(0).data() + 3), 29u);
+  EXPECT_EQ(host.at(1).at(0), relay::MSG_ROSTER);
+  EXPECT_EQ(host.at(1).at(1), 0x01);
+  EXPECT_EQ(match.Received(0), 0u);
+}
+
+void TestForwardingTable(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  const std::vector<unsigned char> GAME = GameCommand(0, 30, 6);
+
+  // GAMECOMMAND goes to every other player, whatever its own relay mask says.
+  std::vector<unsigned char> masked =
+      BuildRecord("FRPCD", relay::COMMAND_GAMECOMMAND, 0x00, 30, 0, std::vector<unsigned char>(3, 9));
+  match.Send(0, {GAME, masked});
+  for (unsigned slot = 1; slot <= 2; ++slot) {
+    std::vector<std::vector<unsigned char>> got = ReceivedRecords(match.m_fixture.m_output, slot + 1);
+    EXPECT_EQ(got.size(), 2u);
+    EXPECT_TRUE(got.size() == 2 && got.at(0) == GAME && got.at(1) == masked);
+  }
+  EXPECT_EQ(match.Received(0), 0u);
+  match.m_fixture.m_output.Clear();
+
+  // FRAMEINFO goes to every other player and ignores the relay mask.
+  std::vector<unsigned char> info =
+      BuildRecord("FRPCD", relay::COMMAND_FRAMEINFO, 0x00, 30, 0, std::vector<unsigned char>{2, 0});
+  match.Send(0, {info});
+  EXPECT_EQ(match.Received(1), 1u);
+  EXPECT_EQ(match.Received(2), 1u);
+  match.m_fixture.m_output.Clear();
+
+  // PLAYERLEAVE for itself goes to every other player.
+  std::vector<unsigned char> leave =
+      BuildRecord("RFPCD", relay::COMMAND_PLAYERLEAVE, 0x00, 31, 1, std::vector<unsigned char>(1, 1));
+  match.Send(1, {leave});
+  EXPECT_EQ(match.Received(0), 1u);
+  EXPECT_EQ(match.Received(2), 1u);
+  EXPECT_EQ(match.Received(1), 0u);
+  match.m_fixture.m_output.Clear();
+
+  // CHAT and RUNAHEAD follow the relay mask, without the sender.
+  match.Send(0, {Chat(0, 0x05)}); // Slots 0 and 2.
+  EXPECT_EQ(match.Received(1), 0u);
+  EXPECT_EQ(match.Received(2), 1u);
+  EXPECT_EQ(match.Received(0), 0u);
+  match.m_fixture.m_output.Clear();
+  match.Send(0, {RunAhead(0, 31, 20, 30, 0x02)}); // Slot 1 only.
+  EXPECT_EQ(match.Received(1), 1u);
+  EXPECT_EQ(match.Received(2), 0u);
+  match.m_fixture.m_output.Clear();
+
+  // RUNAHEADMETRICS goes to the leader only. From the leader itself it has no recipient.
+  std::vector<unsigned char> metrics =
+      BuildRecord("RPCD", relay::COMMAND_RUNAHEADMETRICS, 0xFF, 0, 2, std::vector<unsigned char>(6, 1));
+  match.Send(2, {metrics});
+  EXPECT_EQ(match.Received(0), 1u);
+  EXPECT_EQ(match.Received(1), 0u);
+  match.m_fixture.m_output.Clear();
+  match.Send(0, {BuildRecord("RPCD", relay::COMMAND_RUNAHEADMETRICS, 0xFF, 0, 0, std::vector<unsigned char>(6, 1))});
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+
+  // PROGRESS and LOADCOMPLETE go to every other player.
+  match.Send(1, {Progress(1), Simple(relay::COMMAND_LOADCOMPLETE, 1)});
+  EXPECT_EQ(match.Received(0), 2u);
+  EXPECT_EQ(match.Received(2), 2u);
+  match.m_fixture.m_output.Clear();
+
+  // TIMEOUTSTART only from the host slot.
+  match.Send(0, {Simple(relay::COMMAND_TIMEOUTSTART, 0)});
+  EXPECT_EQ(match.Received(1), 1u);
+  EXPECT_EQ(match.Received(2), 1u);
+  match.m_fixture.m_output.Clear();
+  match.Send(1, {Simple(relay::COMMAND_TIMEOUTSTART, 1)});
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+}
+
+void TestForwardedBytesAreUnchanged(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  std::vector<unsigned char> record = GameCommand(0, 30, 200);
+  for (std::size_t i = GAME_COMMAND_HEADER_SIZE; i < record.size(); ++i) {
+    record.at(i) = static_cast<unsigned char>(i * 7);
+  }
+  match.Send(0, {record});
+  std::vector<std::vector<unsigned char>> got = ReceivedRecords(match.m_fixture.m_output, 2);
+  EXPECT_EQ(got.size(), 1u);
+  EXPECT_TRUE(!got.empty() && got.at(0) == record);
+  // One DATA message: type, length prefix, record.
+  std::vector<std::vector<unsigned char>> messages = match.m_fixture.m_output.For(2);
+  EXPECT_EQ(messages.size(), 1u);
+  EXPECT_EQ(messages.at(0).size(), 1 + 2 + record.size());
+}
+
+void TestMixedMessageForwardsOnlyValidRecords(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  std::vector<unsigned char> good1 = GameCommand(0, 30);
+  std::vector<unsigned char> bad = GameCommand(1, 30); // Wrong player.
+  std::vector<unsigned char> good2 = GameCommand(0, 31);
+  match.Send(0, {good1, bad, good2});
+  std::vector<std::vector<unsigned char>> got = ReceivedRecords(match.m_fixture.m_output, 2);
+  EXPECT_EQ(got.size(), 2u);
+  EXPECT_TRUE(got.size() == 2 && got.at(0) == good1 && got.at(1) == good2);
+  EXPECT_TRUE(!match.m_fixture.m_output.WasClosed(1));
+}
+
+void TestFrameTracking(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+
+  // Window: next_frame 30, so 30 to 158 are accepted, 29 and 159 are not.
+  match.Send(0, {GameCommand(0, 158)});
+  EXPECT_EQ(match.Received(1), 1u);
+  match.m_fixture.m_output.Clear();
+  match.Send(0, {GameCommand(0, 159), GameCommand(0, 29)});
+  EXPECT_EQ(match.Received(1), 0u);
+
+  // FRAMEINFO must carry next_frame exactly. Frames 30, then 31.
+  match.Send(0, {FrameInfo(0, 31, 0)});
+  EXPECT_EQ(match.Received(1), 0u);
+  match.Send(0, {FrameInfo(0, 30, 0), FrameInfo(0, 30, 0), FrameInfo(0, 31, 0)});
+  EXPECT_EQ(match.Received(1), 2u);
+
+  // The window moved with next_frame: 31 is now below it, 32 is its first frame, 160 its last.
+  match.m_fixture.m_output.Clear();
+  match.Send(0, {GameCommand(0, 31), GameCommand(0, 32), GameCommand(0, 160), GameCommand(0, 161)});
+  EXPECT_EQ(match.Received(1), 2u);
+
+  // The other slots keep their own next_frame.
+  match.m_fixture.m_output.Clear();
+  match.Send(1, {GameCommand(1, 30), FrameInfo(1, 30, 1)});
+  EXPECT_EQ(match.Received(0), 2u);
+
+  // PLAYERLEAVE is checked against the window as well, and against the leaving slot.
+  match.m_fixture.m_output.Clear();
+  match.Send(2, {PlayerLeave(2, 29, 2), PlayerLeave(2, 159, 2), PlayerLeave(2, 30, 1), PlayerLeave(2, 30, 2)});
+  EXPECT_EQ(match.Received(0), 1u);
+}
+
+void TestRunAheadRules(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+
+  // Only the leader (slot 0, the lowest connected slot).
+  match.Send(1, {RunAhead(1, 30, 10, 30)});
+  EXPECT_EQ(match.Received(0), 0u);
+  EXPECT_EQ(match.Received(2), 0u);
+
+  struct Case {
+    unsigned m_frame_rate;
+    std::uint16_t m_run_ahead;
+    bool m_valid;
+  };
+  // Frame rate first, then run-ahead.
+  const Case CASES[] = {{5, 4, true},    {60, 64, true}, {30, 3, false}, {30, 65, false},    {4, 10, false},
+                        {61, 10, false}, {30, 0, false}, {0, 10, false}, {30, 0xFFFF, false}};
+  for (const Case &test : CASES) {
+    match.m_fixture.m_output.Clear();
+    match.Send(0, {RunAhead(0, 30, test.m_run_ahead, test.m_frame_rate)});
+    EXPECT_EQ(match.Received(1), test.m_valid ? 1u : 0u);
+  }
+
+  // The frame window applies.
+  match.m_fixture.m_output.Clear();
+  match.Send(0, {RunAhead(0, 159, 10, 30), RunAhead(0, 29, 10, 30), RunAhead(0, 158, 10, 30)});
+  EXPECT_EQ(match.Received(1), 1u);
+}
+
+void TestLeaderFollowsRoster(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  match.m_manager.OnLeave(1); // The leader goes. Slot 1 is next.
+  match.m_fixture.m_output.Clear();
+  match.Send(2, {RunAhead(2, 30, 10, 30)});
+  EXPECT_EQ(match.Received(1), 0u);
+  match.Send(1, {RunAhead(1, 30, 10, 30)});
+  EXPECT_EQ(match.Received(2), 1u);
+}
+
+void TestCommandCount(const relay::RegionKey &key) {
+  // A mismatch is logged, counted and not acted on.
+  MatchFixture match(key);
+  match.Start();
+  match.Send(0, {GameCommand(0, 30), GameCommand(0, 30), PlayerLeave(0, 30, 0), RunAhead(0, 30, 10, 30)});
+  match.m_fixture.m_output.Clear();
+  match.Send(0, {FrameInfo(0, 30, 4)}); // Matches: 4 commands for frame 30.
+  EXPECT_EQ(match.Received(1), 1u);
+  match.Send(0, {GameCommand(0, 31), FrameInfo(0, 31, 7)}); // Mismatch.
+  EXPECT_EQ(match.Received(1), 3u);
+
+  // Strict: the mismatch is a refused record, and next_frame does not move.
+  relay::RecordSettings strict;
+  strict.m_strict_command_count = true;
+  MatchFixture strict_match(key, strict);
+  strict_match.Start();
+  strict_match.Send(0, {GameCommand(0, 30), FrameInfo(0, 30, 2)});
+  EXPECT_EQ(strict_match.Received(1), 1u);
+  strict_match.Send(0, {FrameInfo(0, 30, 1)});
+  EXPECT_EQ(strict_match.Received(1), 2u);
+}
+
+void TestFailedRecordsDropPlayer(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  match.Send(1, {FrameInfo(1, 30, 0), FrameInfo(1, 31, 0)});
+  match.m_fixture.m_output.Clear();
+
+  // 31 failures are not enough. Records still pass.
+  const std::vector<unsigned char> BAD = GameCommand(2, 30); // Wrong player.
+  std::vector<std::vector<unsigned char>> thirty_one(relay::FAILED_RECORDS_BEFORE_DROP - 1, BAD);
+  match.Send(1, thirty_one);
+  EXPECT_TRUE(!match.m_fixture.m_output.WasClosed(2));
+  match.Send(1, {GameCommand(1, 32)});
+  EXPECT_EQ(match.Received(0), 1u);
+
+  // The 32nd failure drops the player, and the records after it in the message are not handled.
+  match.m_fixture.m_output.Clear();
+  match.Send(1, {BAD, GameCommand(1, 33)});
+  EXPECT_TRUE(match.m_fixture.m_output.WasClosed(2));
+  EXPECT_EQ(match.Received(0), 0u);
+  std::vector<std::vector<unsigned char>> host = match.m_fixture.m_output.For(1);
+  EXPECT_EQ(host.size(), 2u);
+  EXPECT_EQ(host.at(0).at(0), relay::MSG_DROP);
+  EXPECT_EQ(host.at(0).at(1), 1);
+  EXPECT_EQ(host.at(0).at(2), relay::DROP_PROTOCOL);
+  EXPECT_EQ(relay::GetU32(host.at(0).data() + 3), 31u); // next_frame 32, so last_frame 31.
+  EXPECT_TRUE(IsMessage(host.at(1), relay::MSG_ROSTER, 0x05, 0));
+  EXPECT_TRUE(match.m_fixture.m_output.For(3).size() == 2);
+
+  // The connection holds no slot any more, so nothing more is handled.
+  match.m_fixture.m_output.Clear();
+  match.Send(1, {GameCommand(1, 33)});
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+}
+
+void TestForwardedRecordsPrecedeDrop(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  std::vector<std::vector<unsigned char>> records(relay::FAILED_RECORDS_BEFORE_DROP, GameCommand(2, 30));
+  records.insert(records.begin(), GameCommand(1, 30));
+  match.Send(1, records);
+  std::vector<std::vector<unsigned char>> host = match.m_fixture.m_output.For(1);
+  EXPECT_EQ(host.size(), 3u);
+  EXPECT_EQ(host.at(0).at(0), relay::MSG_DATA);
+  EXPECT_EQ(host.at(1).at(0), relay::MSG_DROP);
+  EXPECT_EQ(host.at(2).at(0), relay::MSG_ROSTER);
+}
+
+void TestFramingErrors(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  const unsigned char EMPTY = 0;
+
+  // An empty message, a prefix cut in half, and a prefix that claims more than the message holds.
+  match.m_manager.OnData(2, match.m_fixture.m_now_ms, &EMPTY, 0);
+  const unsigned char HALF[] = {0x07};
+  match.m_manager.OnData(2, match.m_fixture.m_now_ms, HALF, sizeof(HALF));
+  std::vector<unsigned char> body = DataBody({Progress(1)});
+  body.at(0) = static_cast<unsigned char>(body.at(0) + 1);
+  match.m_manager.OnData(2, match.m_fixture.m_now_ms, body.data(), body.size());
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+
+  // A record shorter than 7 bytes inside a well-framed message is skipped and counted, and the next one passes.
+  std::vector<unsigned char> short_record(6, 'T');
+  match.Send(1, {short_record, Progress(1)});
+  EXPECT_EQ(match.Received(0), 1u);
+
+  // A whole message over 16384 bytes is refused.
+  std::vector<unsigned char> huge(relay::MAX_MESSAGE_SIZE, 0);
+  match.m_manager.OnData(2, match.m_fixture.m_now_ms, huge.data(), huge.size());
+  EXPECT_EQ(match.Received(0), 1u);
+
+  // Three records of 4096 bytes pass in one piece.
+  match.m_fixture.m_output.Clear();
+  std::vector<unsigned char> big = GameCommand(0, 30, relay::MAX_RECORD_SIZE - GAME_COMMAND_HEADER_SIZE);
+  std::vector<std::vector<unsigned char>> three(3, big);
+  match.m_fixture.m_now_ms += 5000;
+  match.Send(0, three);
+  EXPECT_EQ(match.Received(1), 3u);
+  EXPECT_EQ(match.m_fixture.m_output.For(2).size(), 1u);
+}
+
+void TestUnboundConnectionIgnored(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  std::vector<unsigned char> body = DataBody({Progress(0)});
+  match.m_manager.OnData(99, match.m_fixture.m_now_ms, body.data(), body.size());
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+}
+
+void TestSenderSlotComesFromConnection(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  // Connection 2 is slot 1. A record that names slot 0 is refused, and one that names slot 1 is not.
+  match.Send(1, {GameCommand(0, 30)});
+  EXPECT_EQ(match.Received(0), 0u);
+  match.Send(1, {GameCommand(1, 30)});
+  EXPECT_EQ(match.Received(0), 1u);
+}
+
+void TestDataRateLimits(const relay::RegionKey &key) {
+  {
+    // 600 records in a second pass, the 601st drops the player.
+    MatchFixture match(key);
+    match.Start();
+    std::vector<std::vector<unsigned char>> records(relay::MAX_RECORDS_PER_SECOND, Progress(1));
+    match.Send(1, records);
+    EXPECT_TRUE(!match.m_fixture.m_output.WasClosed(2));
+    match.Send(1, {Progress(1)});
+    EXPECT_TRUE(match.m_fixture.m_output.WasClosed(2));
+    std::vector<std::vector<unsigned char>> host = ControlMessages(match.m_fixture.m_output, 1);
+    EXPECT_EQ(host.at(0).at(0), relay::MSG_DROP);
+    EXPECT_EQ(host.at(0).at(2), relay::DROP_PROTOCOL);
+  }
+  {
+    // A new second starts a new window.
+    MatchFixture match(key);
+    match.Start();
+    std::vector<std::vector<unsigned char>> records(relay::MAX_RECORDS_PER_SECOND, Progress(1));
+    match.Send(1, records);
+    match.Send(1, records, relay::DATA_RATE_WINDOW_MS);
+    EXPECT_TRUE(!match.m_fixture.m_output.WasClosed(2));
+  }
+  {
+    // 64 KB in a second: five messages of 12295 bytes are under the limit, the sixth is over it.
+    MatchFixture match(key);
+    match.Start();
+    std::vector<unsigned char> big = GameCommand(1, 30, relay::MAX_RECORD_SIZE - GAME_COMMAND_HEADER_SIZE);
+    std::vector<std::vector<unsigned char>> three(3, big);
+    std::vector<unsigned char> body = DataBody(three);
+    // 3 * (4096 + 2) bytes plus the type byte.
+    EXPECT_EQ(1 + body.size(), 12295u);
+    for (int i = 0; i < 5; ++i) {
+      match.m_manager.OnData(2, match.m_fixture.m_now_ms, body.data(), body.size());
+    }
+    EXPECT_TRUE(!match.m_fixture.m_output.WasClosed(2)); // 5 * 12295 = 61475 bytes.
+    match.m_manager.OnData(2, match.m_fixture.m_now_ms, body.data(), body.size());
+    EXPECT_TRUE(match.m_fixture.m_output.WasClosed(2)); // 73770 bytes.
+  }
+}
+
+void TestMatchRecordsCounters() {
+  relay::MatchRecords records;
+  relay::MatchContext context;
+  context.m_sender = 1;
+  context.m_connected_mask = 0x07;
+  context.m_leader_slot = 0;
+  context.m_host_slot = 0;
+  relay::RecordHeader header;
+  header.m_type = relay::COMMAND_GAMECOMMAND;
+  header.m_has_frame = true;
+  header.m_frame = 30;
+  header.m_player = 1;
+  relay::RecordOutcome outcome;
+  EXPECT_EQ(records.NextFrame(1), relay::INITIAL_NEXT_FRAME);
+  EXPECT_EQ(records.Accept(header, context, outcome), relay::FAULT_NONE);
+  EXPECT_EQ(outcome.m_forward_mask, 0x05);
+  header.m_frame = 5;
+  EXPECT_EQ(records.Accept(header, context, outcome), relay::FAULT_FRAME_WINDOW);
+  EXPECT_TRUE(!records.Reject(1, relay::FAULT_FRAME_WINDOW));
+  records.CountIn();
+  records.CountIn();
+  records.CountForwarded();
+  EXPECT_EQ(records.Counters().m_records_in, 2u);
+  EXPECT_EQ(records.Counters().m_forwarded, 1u);
+  EXPECT_EQ(records.Counters().m_dropped[relay::FAULT_FRAME_WINDOW], 1u);
+  EXPECT_EQ(records.Counters().m_dropped[relay::FAULT_WRONG_PLAYER], 0u);
+
+  // The 32nd rejection for one slot reaches the limit. Another slot counts on its own.
+  for (std::size_t i = 1; i < relay::FAILED_RECORDS_BEFORE_DROP - 1; ++i) {
+    EXPECT_TRUE(!records.Reject(1, relay::FAULT_BAD_HEADER));
+  }
+  EXPECT_TRUE(!records.Reject(2, relay::FAULT_BAD_HEADER));
+  EXPECT_TRUE(records.Reject(1, relay::FAULT_BAD_HEADER));
+
+  // The frame window cannot overflow near the top of the 32-bit range.
+  header.m_frame = 0xFFFFFFFFu;
+  EXPECT_EQ(records.Accept(header, context, outcome), relay::FAULT_FRAME_WINDOW);
+}
+
+void TestCommandCountRingDoesNotMixFrames() {
+  // Frames 30 and 286 share a ring entry. Only frames inside one window are live together, so after 30 closes,
+  // commands for 286 count on their own.
+  relay::MatchRecords records;
+  relay::MatchContext context;
+  context.m_sender = 0;
+  context.m_connected_mask = 0x03;
+  relay::RecordOutcome outcome;
+  relay::RecordHeader header;
+  header.m_type = relay::COMMAND_GAMECOMMAND;
+  header.m_player = 0;
+  header.m_frame = 30;
+  EXPECT_EQ(records.Accept(header, context, outcome), relay::FAULT_NONE);
+  relay::RecordHeader info;
+  info.m_type = relay::COMMAND_FRAMEINFO;
+  info.m_player = 0;
+  for (std::uint32_t frame = 30; frame < 286; ++frame) {
+    info.m_frame = frame;
+    info.m_command_count = frame == 30 ? 1 : 0;
+    EXPECT_EQ(records.Accept(info, context, outcome), relay::FAULT_NONE);
+    EXPECT_TRUE(!outcome.m_count_mismatch);
+  }
+  header.m_frame = 286;
+  EXPECT_EQ(records.Accept(header, context, outcome), relay::FAULT_NONE);
+  info.m_frame = 286;
+  info.m_command_count = 1;
+  EXPECT_EQ(records.Accept(info, context, outcome), relay::FAULT_NONE);
+  EXPECT_TRUE(!outcome.m_count_mismatch);
+}
+
+void TestMatchRecords(const relay::RegionKey &key) {
+  TestScanAcceptsEachType();
+  TestScanLengthLimits();
+  TestScanHeaderRules();
+  TestScanReadsOnlyInsideRecord();
+  TestMatchRecordsCounters();
+  TestCommandCountRingDoesNotMixFrames();
+  TestDataBeforeStartDropsPlayer(key);
+  TestForwardingTable(key);
+  TestForwardedBytesAreUnchanged(key);
+  TestMixedMessageForwardsOnlyValidRecords(key);
+  TestFrameTracking(key);
+  TestRunAheadRules(key);
+  TestLeaderFollowsRoster(key);
+  TestCommandCount(key);
+  TestFailedRecordsDropPlayer(key);
+  TestForwardedRecordsPrecedeDrop(key);
+  TestFramingErrors(key);
+  TestUnboundConnectionIgnored(key);
+  TestSenderSlotComesFromConnection(key);
+  TestDataRateLimits(key);
+}
+
 } // namespace
 
 namespace {
@@ -958,6 +1693,7 @@ int RunTests() {
   TestSessionAndAddressLimits(key);
   TestFailedJoinsPerSession(key);
   TestRandomValuesDiffer(key);
+  TestMatchRecords(key);
 
   static_cast<void>(std::remove(key_path.c_str()));
   static_cast<void>(std::remove((key_path + ".pub").c_str()));

@@ -6,11 +6,13 @@
 
 #include "protocol.h"
 #include "rate_limit.h"
+#include "records.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace relay {
 
@@ -31,6 +33,7 @@ struct SessionSettings {
   std::uint16_t region = 0;
   bool check_address = true; // False only with the relay's test start option.
   std::size_t max_sessions = 200;
+  RecordSettings records;
 };
 
 // What the host knows about one received first message.
@@ -52,6 +55,10 @@ public:
   // CREATED and WELCOME, WELCOME, or REFUSE followed by a close.
   void OnCreate(const SessionRequest &request, const unsigned char *body, std::size_t length);
   void OnJoin(const SessionRequest &request, const unsigned char *body, std::size_t length);
+
+  // DATA from a bound connection: body is the message without its type byte, a list of length-prefixed records
+  // (PROTOCOL.md 4.6). Valid records are forwarded unchanged. Does nothing for a connection that holds no slot.
+  void OnData(std::uint32_t connection, std::uint32_t now_ms, const unsigned char *body, std::size_t length);
 
   // LEAVE from a bound connection. Has the effect of closing the connection.
   void OnLeave(std::uint32_t connection);
@@ -80,6 +87,7 @@ private:
     std::uint32_t m_created_ms = 0;
     std::size_t m_failed_joins = 0;
     bool m_started = false;
+    MatchRecords m_records;
   };
 
   struct Binding {
@@ -106,6 +114,18 @@ private:
   void ExpireSession(std::uint64_t session_id, Session &session);
   void RemoveSession(std::uint64_t session_id);
 
+  // Match records (match_data.cpp).
+  bool ProcessRecords(Session &session, std::uint8_t slot, std::uint32_t now_ms, const unsigned char *body,
+                      std::size_t length);
+  bool ProcessRecord(Session &session, std::uint8_t slot, std::uint32_t now_ms, const unsigned char *record,
+                     std::size_t length);
+  bool RejectRecord(Session &session, std::uint8_t slot, RecordFault fault, const RecordHeader *header) const;
+  void ForwardRecord(const Session &session, std::uint8_t mask, const unsigned char *record, std::size_t length);
+  void FlushForwarded(const Session &session);
+  void FlushDestination(const Session &session, std::size_t slot);
+  void DropConnection(std::uint32_t connection, DropReason reason);
+  void LogCounters(const Session &session) const;
+
   SessionSettings settings_;
   SessionOutput &output_;
   AddressRateLimiter create_limiter_;
@@ -113,6 +133,9 @@ private:
   std::unordered_map<std::uint64_t, Session> sessions_;
   std::unordered_map<std::uint32_t, Binding> bindings_;
   std::unordered_set<std::uint64_t> live_pass_ids_;
+  // Outgoing DATA messages being built, one buffer of MAX_MESSAGE_SIZE bytes per destination slot. Allocated once.
+  std::vector<unsigned char> out_buffers_;
+  std::size_t out_lengths_[SLOT_COUNT] = {};
 };
 
 // Lowest set bit of a connected mask, which is the leader slot (PROTOCOL.md 4.6). The mask must not be 0.
