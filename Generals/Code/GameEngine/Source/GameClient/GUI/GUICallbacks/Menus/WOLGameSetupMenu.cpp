@@ -291,6 +291,50 @@ static void updateServersGate()
 			break;
 	}
 }
+
+// Match start (2.1): the relay handshake that replaces the player-to-player negotiation.
+static Bool s_serversStartPending = FALSE;
+static UnsignedByte s_serversStartMask = 0;
+static AsciiString s_serversStartNames[MAX_SLOTS];
+
+// Snapshot the human roster when Start is pressed, to spot a join or leave before the start signal.
+static void captureServersStartRoster( GameSpyStagingRoom *game )
+{
+	s_serversStartMask = 0;
+	for( Int i = 0; i < MAX_SLOTS; ++i )
+	{
+		const GameSlot *slot = game ? game->getConstSlot( i ) : nullptr;
+		if( slot && slot->isHuman() )
+		{
+			s_serversStartMask |= (1 << i);
+			s_serversStartNames[i].translate( slot->getName() );
+		}
+		else
+		{
+			s_serversStartNames[i].clear();
+		}
+	}
+}
+
+static Bool serversStartRosterUnchanged( GameSpyStagingRoom *game )
+{
+	for( Int i = 0; i < MAX_SLOTS; ++i )
+	{
+		const GameSlot *slot = game ? game->getConstSlot( i ) : nullptr;
+		Bool human = (slot != nullptr) && slot->isHuman();
+		Bool had = (s_serversStartMask & (1 << i)) != 0;
+		if( human != had )
+			return FALSE;
+		if( human )
+		{
+			AsciiString name;
+			name.translate( slot->getName() );
+			if( name != s_serversStartNames[i] )
+				return FALSE;
+		}
+	}
+	return TRUE;
+}
 #endif
 
 void updateMapStartSpots( GameInfo *myGame, GameWindow *buttonMapStartPositions[], Bool onLoadScreen = FALSE );
@@ -924,6 +968,52 @@ static void StartPressed()
 
 	if(isReady)
 	{
+#ifdef RTS_SERVERS
+		// TheSuperHackers @feature Kayoti 13/11/2026 In Servers mode the host opens a relay session instead of
+		// negotiating player to player. The start signal and the private join tokens are sent once CREATED arrives.
+		if (ServersModeIsOn())
+		{
+			// One bit per human slot (PROTOCOL.md 4.5). The host is slot 0.
+			UnsignedByte slotMask = 0;
+			Int maskCount = 0;
+			for (Int s = 0; s < MAX_SLOTS; ++s)
+			{
+				const GameSlot *hs = myGame->getConstSlot(s);
+				if (hs && hs->isHuman())
+				{
+					slotMask |= (1 << s);
+					++maskCount;
+				}
+			}
+
+			// Start is unavailable with fewer than two human players.
+			if (maskCount < 2)
+			{
+				TheGameSpyInfo->addText(TheGameText->fetch("GUI:NeedHumanPlayers"), GameSpyColor[GSCOLOR_DEFAULT], listboxGameSetupChat);
+				return;
+			}
+
+			SendStatsToOtherPlayers(myGame);
+
+			if (!ServersMatchHostBegin(0, slotMask))
+			{
+				TheGameSpyInfo->addText(ServersModeRefusalText(SERVER_REFUSE_NO_ANSWER, 0, 0), GameSpyColor[GSCOLOR_DEFAULT], listboxGameSetupChat);
+				return;
+			}
+
+			// Disable Start (and Back) while the relay session opens; both are re-enabled on failure.
+			buttonStart->winEnable(FALSE);
+			buttonBack->winEnable(FALSE);
+			GameWindow *buttonBuddy = TheWindowManager->winGetWindowFromId(nullptr, NAMEKEY("GameSpyGameOptionsMenu.wnd:ButtonCommunicator"));
+			if (buttonBuddy)
+				buttonBuddy->winEnable(FALSE);
+			GameSpyCloseOverlay(GSOVERLAY_BUDDY);
+
+			captureServersStartRoster(myGame);
+			s_serversStartPending = TRUE;
+			return;
+		}
+#endif
 		PeerRequest req;
 		req.peerRequestType = PeerRequest::PEERREQUEST_STARTGAME;
 		TheGameSpyPeerMessageQueue->addRequest(req);
@@ -1256,6 +1346,13 @@ void WOLGameSetupMenuInit( WindowLayout *layout, void *userData )
 	isShuttingDown = false;
 	launchGameNext = FALSE;
 
+#ifdef RTS_SERVERS
+	// A fresh staging room: drop any pending relay handshake and any private start message from before.
+	s_serversStartPending = FALSE;
+	ServersMatchAbort();
+	ServersMatchForgetPrivate();
+#endif
+
 	//initialize the gadgets
 	EnableSlotListUpdates(FALSE);
 	InitWOLGameGadgets();
@@ -1465,6 +1562,116 @@ static void fillPlayerInfo(const PeerResponse *resp, PlayerInfo *info)
 	info->m_preorder	= resp->player.preorder;
 }
 
+#ifdef RTS_SERVERS
+// Drive the relay handshake started by Start (host) or the start signal (member). On success it launches
+// the match in place of NAT; on failure the host keeps the lobby open and a member returns to the lobby list.
+// Returns TRUE when the match has launched or the screen has been popped, so the caller stops updating.
+static Bool updateServersMatchStart()
+{
+	if( !s_serversStartPending )
+		return FALSE;
+
+	GameSpyStagingRoom *myGame = TheGameSpyInfo ? TheGameSpyInfo->getCurrentStagingRoom() : nullptr;
+	Bool amHost = TheGameSpyInfo && TheGameSpyInfo->amIHost();
+
+	switch( ServersMatchUpdate() )
+	{
+		case SERVERS_MATCH_CONTACTING:
+			return FALSE;
+
+		case SERVERS_MATCH_HOST_READY:
+		{
+			// A join or leave since Start: close the relay connection, re-enable Start, send nothing (PROTOCOL.md 5.4 step 7).
+			if( myGame == nullptr || !serversStartRosterUnchanged( myGame ) )
+			{
+				ServersMatchAbort();
+				s_serversStartPending = FALSE;
+				if( buttonStart ) buttonStart->winEnable( TRUE );
+				if( buttonBack ) buttonBack->winEnable( TRUE );
+				if( myGame )
+					TheGameSpyInfo->addText( TheGameText->fetch( "GUI:ServersStartRosterChanged" ), GameSpyColor[GSCOLOR_DEFAULT], listboxGameSetupChat );
+				return FALSE;
+			}
+
+			// Give each other human player its session id, slot and join token privately (PROTOCOL.md 5.4 step 4).
+			for( Int i = 1; i < MAX_SLOTS; ++i )
+			{
+				const GameSlot *slot = myGame->getConstSlot( i );
+				if( slot == nullptr || !slot->isHuman() )
+					continue;
+				AsciiString payload;
+				if( !ServersMatchBuildPrivate( (UnsignedByte)i, payload ) )
+					continue;
+				AsciiString targetName;
+				targetName.translate( slot->getName() );
+				PeerRequest req;
+				req.peerRequestType = PeerRequest::PEERREQUEST_UTMPLAYER;
+				req.UTM.isStagingRoom = TRUE;
+				req.id = "SRV";
+				req.nick = targetName.str();
+				req.options = payload.str();
+				TheGameSpyPeerMessageQueue->addRequest( req );
+			}
+
+			// Trigger the existing match start signal (PROTOCOL.md 5.4 step 5), then launch through the relay.
+			PeerRequest startReq;
+			startReq.peerRequestType = PeerRequest::PEERREQUEST_STARTGAME;
+			TheGameSpyPeerMessageQueue->addRequest( startReq );
+
+			s_serversStartPending = FALSE;
+			*TheGameSpyGame = *myGame;
+			TheGameSpyGame->startGame( 0 );
+			TheGameSpyGame->launchGame();
+			if( TheGameSpyInfo )
+				TheGameSpyInfo->leaveStagingRoom();
+			return TRUE;
+		}
+
+		case SERVERS_MATCH_CONNECTED:
+			// Member: the relay has us. Load the match; START releases the records inside the networking code.
+			s_serversStartPending = FALSE;
+			if( TheGameSpyGame )
+			{
+				TheGameSpyGame->launchGame();
+				if( TheGameSpyInfo )
+					TheGameSpyInfo->leaveStagingRoom();
+			}
+			return TRUE;
+
+		case SERVERS_MATCH_FAILED:
+		case SERVERS_MATCH_CANCELLED:
+			s_serversStartPending = FALSE;
+			if( amHost )
+			{
+				// Keep the lobby open with Start enabled again (PROTOCOL.md 5.4 step 3).
+				if( buttonStart ) buttonStart->winEnable( TRUE );
+				if( buttonBack ) buttonBack->winEnable( TRUE );
+				if( myGame )
+					TheGameSpyInfo->addText( ServersModeRefusalText( SERVER_REFUSE_NO_ANSWER, 0, 0 ), GameSpyColor[GSCOLOR_DEFAULT], listboxGameSetupChat );
+				return FALSE;
+			}
+			// Member: return to the lobby list with a message (Done-when, PROTOCOL.md 5.4 step 6).
+			if( !buttonPushed )
+			{
+				if( myGame )
+					myGame->reset();
+				if( TheGameSpyInfo )
+					TheGameSpyInfo->leaveStagingRoom();
+				buttonPushed = true;
+				GSMessageBoxOk( TheGameText->fetch( "GUI:ServersTitle" ), TheGameText->fetch( "GUI:ServersCouldNotJoin" ) );
+				nextScreen = "Menus/WOLCustomLobby.wnd";
+				TheShell->pop();
+			}
+			return TRUE;
+
+		default:
+			// IDLE: the handshake is gone.
+			s_serversStartPending = FALSE;
+			return FALSE;
+	}
+}
+#endif
+
 //-------------------------------------------------------------------------------------------------
 /** Lan Game Options menu update method */
 //-------------------------------------------------------------------------------------------------
@@ -1472,7 +1679,11 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 {
 #ifdef RTS_SERVERS
 	if (ServersModeIsOn())
+	{
 		updateServersGate();
+		if (updateServersMatchStart())
+			return;
+	}
 #endif
 
 	// We'll only be successful if we've requested to
@@ -1624,6 +1835,56 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 
 					if (!TheGameSpyGame)
 						break;
+
+#ifdef RTS_SERVERS
+					// TheSuperHackers @feature Kayoti 13/11/2026 In Servers mode a member joins the relay session with
+					// the private token the host sent it, instead of negotiating player to player.
+					if (ServersModeIsOn())
+					{
+						// No private message for this start: this member cannot join (PROTOCOL.md 5.4 step 6).
+						if (!ServersMatchHasPrivate())
+						{
+							if (!buttonPushed)
+							{
+								myGame->reset();
+								TheGameSpyInfo->leaveStagingRoom();
+								buttonPushed = true;
+								GSMessageBoxOk(TheGameText->fetch("GUI:ServersTitle"), TheGameText->fetch("GUI:ServersCouldNotJoin"));
+								nextScreen = "Menus/WOLCustomLobby.wnd";
+								TheShell->pop();
+							}
+							break;
+						}
+
+						SendStatsToOtherPlayers(TheGameSpyGame);
+
+						buttonBack->winEnable(FALSE);
+						GameWindow *serversButtonBuddy = TheWindowManager->winGetWindowFromId(nullptr, NAMEKEY("GameSpyGameOptionsMenu.wnd:ButtonCommunicator"));
+						if (serversButtonBuddy)
+							serversButtonBuddy->winEnable(FALSE);
+						GameSpyCloseOverlay(GSOVERLAY_BUDDY);
+
+						*TheGameSpyGame = *myGame;
+						TheGameSpyGame->startGame(0);
+
+						if (!ServersMatchJoinBegin())
+						{
+							if (!buttonPushed)
+							{
+								myGame->reset();
+								TheGameSpyInfo->leaveStagingRoom();
+								buttonPushed = true;
+								GSMessageBoxOk(TheGameText->fetch("GUI:ServersTitle"), TheGameText->fetch("GUI:ServersCouldNotJoin"));
+								nextScreen = "Menus/WOLCustomLobby.wnd";
+								TheShell->pop();
+							}
+							break;
+						}
+
+						s_serversStartPending = TRUE;
+						break;
+					}
+#endif
 
 					SendStatsToOtherPlayers(TheGameSpyGame);
 
@@ -2069,6 +2330,16 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 							TheGameSpyPSMessageQueue->trackPlayerStats(stats);
 						break;
 					}
+#ifdef RTS_SERVERS
+					// TheSuperHackers @feature Kayoti 13/11/2026 The host's private join message (PROTOCOL.md 5.4). Only the host (slot 0) hands out tokens.
+					if (ServersModeIsOn() && strcmp(resp.command.c_str(), "SRV") == 0)
+					{
+						GameSpyStagingRoom *srvGame = TheGameSpyInfo->getCurrentStagingRoom();
+						if (srvGame && !TheGameSpyInfo->amIHost() && srvGame->getSlotNum(resp.nick.c_str()) == 0)
+							ServersMatchStorePrivate(resp.commandOptions.c_str());
+						break;
+					}
+#endif
 					GameSpyStagingRoom *game = TheGameSpyInfo->getCurrentStagingRoom();
 					if (game)
 					{

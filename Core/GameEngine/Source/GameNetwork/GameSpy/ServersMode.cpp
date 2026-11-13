@@ -26,6 +26,8 @@
 
 #ifdef RTS_SERVERS
 
+#include <cstdlib>
+
 #include "Common/GlobalData.h"
 #include "GameClient/GameText.h"
 #include "GameClient/GameWindowManager.h"
@@ -35,6 +37,7 @@
 #include "GameNetwork/GameSpy/PeerThread.h"
 #include "GameNetwork/GameSpy/ServersMode.h"
 #include "GameNetwork/GameSpyOverlay.h"
+#include "GameNetwork/ServerLink.h"
 
 // The region file is read from the working directory of the game.
 static const char *const SERVERS_REGION_FILE = "regions.txt";
@@ -45,6 +48,23 @@ static GameWindow *s_gateWindow = nullptr;
 static ServersGate s_gateAction = SERVERS_GATE_NONE;
 static Bool s_gateCancelled = FALSE;
 static Bool s_tearDownPending = FALSE;	// ServersLogoutOnline() has been called and the session is not yet torn down
+
+// The match-start handshake (2.1). The relay link it owns is lent to the networking code at match launch.
+static const UnsignedInt SERVERS_MATCH_TIMEOUT_MS = 15 * 1000;	// Time the relay has to answer CREATE or JOIN with WELCOME.
+static ServerLink *s_matchLink = nullptr;
+static GameWindow *s_matchWindow = nullptr;
+static Bool s_matchIsHost = FALSE;
+static Bool s_matchCreatedSeen = FALSE;				// Host: the CREATED event has been read
+static Bool s_matchResultGiven = FALSE;				// HOST_READY or CONNECTED has already been returned once
+static Bool s_matchCancelled = FALSE;
+static UnsignedInt64 s_matchSessionId = 0;
+static UnsignedInt64 s_matchTokens[ServerLinkEvent::MAX_SLOTS] = { 0 };
+
+// The private start message this member was given (PROTOCOL.md 5.4).
+static Bool s_privateHave = FALSE;
+static UnsignedInt64 s_privateSessionId = 0;
+static UnsignedByte s_privateSlot = 0;
+static UnsignedInt64 s_privateToken = 0;
 
 static void closeGateWindow()
 {
@@ -102,6 +122,8 @@ void ServersModeSet( const ServerRegion &region, const ServerPass &pass )
 void ServersModeClear()
 {
 	releaseGate();
+	ServersMatchAbort();
+	ServersMatchForgetPrivate();
 	s_tearDownPending = FALSE;
 	s_state.on = FALSE;
 	memset( &s_state.region, 0, sizeof( s_state.region ) );
@@ -388,6 +410,213 @@ void ServersTearDownOnline()
 
 	s_tearDownPending = FALSE;
 	TearDownGameSpy();
+}
+
+// Match start ------------------------------------------------------------------------------------
+
+static void closeMatchWindow()
+{
+	if( s_matchWindow )
+	{
+		TheWindowManager->winDestroy( s_matchWindow );
+		s_matchWindow = nullptr;
+	}
+}
+
+// The message box destroys its window after this returns
+static void matchCancelledCallback()
+{
+	s_matchWindow = nullptr;
+	s_matchCancelled = TRUE;
+}
+
+static void showContacting()
+{
+	s_matchWindow = MessageBoxCancel( TheGameText->fetch( "GUI:ServersTitle" ),
+		TheGameText->fetch( "GUI:ServersContacting" ), matchCancelledCallback );
+}
+
+void ServersMatchAbort()
+{
+	closeMatchWindow();
+	if( s_matchLink != nullptr )
+	{
+		s_matchLink->close();
+		delete s_matchLink;
+		s_matchLink = nullptr;
+	}
+	s_matchIsHost = FALSE;
+	s_matchCreatedSeen = FALSE;
+	s_matchResultGiven = FALSE;
+	s_matchCancelled = FALSE;
+	s_matchSessionId = 0;
+	for( Int i = 0; i < ServerLinkEvent::MAX_SLOTS; ++i )
+		s_matchTokens[i] = 0;
+}
+
+Bool ServersMatchHostBegin( UnsignedByte hostSlot, UnsignedByte slotMask )
+{
+	ServersMatchAbort();
+
+	if( !s_state.on )
+		return FALSE;
+	if( hostSlot >= ServerLinkEvent::MAX_SLOTS )
+		return FALSE;
+	// slotMask must include the host slot and at least one other slot (PROTOCOL.md 4.5).
+	if( ( slotMask & ( 1 << hostSlot ) ) == 0 )
+		return FALSE;
+	if( ( slotMask & ~( 1 << hostSlot ) ) == 0 )
+		return FALSE;
+
+	s_matchLink = NEW ServerLink;
+	if( !s_matchLink->create( s_state.region, s_state.pass, hostSlot, slotMask, SERVERS_MATCH_TIMEOUT_MS ) )
+	{
+		delete s_matchLink;
+		s_matchLink = nullptr;
+		return FALSE;
+	}
+
+	s_matchIsHost = TRUE;
+	showContacting();
+	return TRUE;
+}
+
+Bool ServersMatchJoinBegin()
+{
+	ServersMatchAbort();
+
+	if( !s_state.on )
+		return FALSE;
+	if( !s_privateHave )
+		return FALSE;
+
+	s_matchLink = NEW ServerLink;
+	if( !s_matchLink->join( s_state.region, s_state.pass, s_privateSessionId, s_privateSlot, s_privateToken, SERVERS_MATCH_TIMEOUT_MS ) )
+	{
+		delete s_matchLink;
+		s_matchLink = nullptr;
+		return FALSE;
+	}
+
+	s_matchIsHost = FALSE;
+	showContacting();
+	return TRUE;
+}
+
+Bool ServersMatchStorePrivate( const char *payload )
+{
+	if( payload == nullptr )
+		return FALSE;
+
+	// Parse "<session_id as 16 hex>/<slot as 1 digit>/<join_token as 16 hex>" (PROTOCOL.md 5.4).
+	char *end = nullptr;
+	const char *cursor = payload;
+
+	UnsignedInt64 sessionId = (UnsignedInt64)std::strtoull( cursor, &end, 16 );
+	if( end == cursor || *end != '/' )
+		return FALSE;
+
+	cursor = end + 1;
+	unsigned long slot = std::strtoul( cursor, &end, 10 );
+	if( end == cursor || *end != '/' || slot >= ServerLinkEvent::MAX_SLOTS )
+		return FALSE;
+
+	cursor = end + 1;
+	UnsignedInt64 token = (UnsignedInt64)std::strtoull( cursor, &end, 16 );
+	if( end == cursor || *end != '\0' )
+		return FALSE;
+
+	s_privateSessionId = sessionId;
+	s_privateSlot = (UnsignedByte)slot;
+	s_privateToken = token;
+	s_privateHave = TRUE;
+	return TRUE;
+}
+
+Bool ServersMatchHasPrivate()
+{
+	return s_privateHave;
+}
+
+void ServersMatchForgetPrivate()
+{
+	s_privateHave = FALSE;
+	s_privateSessionId = 0;
+	s_privateSlot = 0;
+	s_privateToken = 0;
+}
+
+Bool ServersMatchBuildPrivate( UnsignedByte slot, AsciiString &outPayload )
+{
+	if( !s_matchCreatedSeen )
+		return FALSE;
+	if( slot >= ServerLinkEvent::MAX_SLOTS )
+		return FALSE;
+	// A zero token means the relay expects no join for that slot (the host slot and unexpected slots).
+	if( s_matchTokens[slot] == 0 )
+		return FALSE;
+
+	outPayload.format( "%016I64x/%u/%016I64x", s_matchSessionId, (UnsignedInt)slot, s_matchTokens[slot] );
+	return TRUE;
+}
+
+ServersMatchResult ServersMatchUpdate()
+{
+	if( s_matchLink == nullptr )
+		return SERVERS_MATCH_IDLE;
+
+	if( s_matchCancelled )
+	{
+		ServersMatchAbort();
+		return SERVERS_MATCH_CANCELLED;
+	}
+
+	s_matchLink->update();
+
+	// Host only: read the CREATED event (it arrives before WELCOME) so the private messages can be built.
+	// Stop at CREATED so WELCOME, ROSTER and START stay queued for the networking code once the link is lent out.
+	if( s_matchIsHost && !s_matchCreatedSeen )
+	{
+		ServerLinkEvent event;
+		while( s_matchLink->nextEvent( event ) )
+		{
+			if( event.type == ServerLinkEvent::TYPE_CREATED )
+			{
+				s_matchSessionId = event.sessionId;
+				for( Int i = 0; i < ServerLinkEvent::MAX_SLOTS; ++i )
+					s_matchTokens[i] = event.joinTokens[i];
+				s_matchCreatedSeen = TRUE;
+				break;
+			}
+			if( event.type == ServerLinkEvent::TYPE_REFUSE || event.type == ServerLinkEvent::TYPE_LOST )
+				break;
+		}
+	}
+
+	switch( s_matchLink->getState() )
+	{
+		case ServerLink::STATE_CONNECTING:
+			return SERVERS_MATCH_CONTACTING;
+
+		case ServerLink::STATE_CONNECTED:
+			if( s_matchResultGiven )
+				return SERVERS_MATCH_CONTACTING;	// already reported; waiting for the caller to launch
+			if( s_matchIsHost && !s_matchCreatedSeen )
+				return SERVERS_MATCH_CONTACTING;	// hold until CREATED's join tokens have been read
+			closeMatchWindow();
+			s_matchResultGiven = TRUE;
+			return s_matchIsHost ? SERVERS_MATCH_HOST_READY : SERVERS_MATCH_CONNECTED;
+
+		default:
+			// STATE_CLOSED, STATE_LEAVING, STATE_IDLE: the handshake ended before it connected.
+			ServersMatchAbort();
+			return SERVERS_MATCH_FAILED;
+	}
+}
+
+ServerLink *ServersMatchLink()
+{
+	return s_matchLink;
 }
 
 #endif // RTS_SERVERS

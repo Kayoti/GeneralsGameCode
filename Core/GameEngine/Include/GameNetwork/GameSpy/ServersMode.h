@@ -128,4 +128,57 @@ void ServersLogoutOnline();
 /// Tears the online session down if ServersLogoutOnline() asked for it, as the Welcome screen's Back does. Does nothing otherwise.
 void ServersTearDownOnline();
 
+// Match start ------------------------------------------------------------------------------------
+// The relay handshake that replaces the player-to-player negotiation of an Online match start.
+// Driven from the staging room each frame. Protocol: docs/servers/PROTOCOL.md, sections 4.5 and 5.4.
+
+class ServerLink;
+
+enum ServersMatchResult
+{
+	SERVERS_MATCH_IDLE,				///< No handshake is running
+	SERVERS_MATCH_CONTACTING,	///< Waiting for the relay, up to WELCOME
+	SERVERS_MATCH_HOST_READY,	///< Host only, returned once: CREATED and WELCOME are in. Send the private messages and the start signal, then launch.
+	SERVERS_MATCH_CONNECTED,	///< Member only, returned once: WELCOME is in. Launch the match.
+	SERVERS_MATCH_FAILED,			///< Returned once: refused, lost or timed out. The caller shows a message and backs out.
+	SERVERS_MATCH_CANCELLED,	///< Returned once: the player cancelled the "Contacting server" box.
+};
+
+/**
+ * Host: opens the relay session. hostSlot is the host's slot and slotMask has one bit per human slot
+ * (PROTOCOL.md 4.5). Shows the "Contacting server" box. Returns FALSE, without opening anything, if
+ * Servers mode is off, the arguments are invalid, or the link could not be opened.
+ */
+Bool ServersMatchHostBegin( UnsignedByte hostSlot, UnsignedByte slotMask );
+
+/**
+ * Member: enters the match using the private message stored for this start. Shows the "Contacting server"
+ * box. Returns FALSE if there is no stored private message, Servers mode is off, or the link could not be opened.
+ */
+Bool ServersMatchJoinBegin();
+
+/// Member: stores a private start message payload from the host, "<session_id>/<slot>/<join_token>" (PROTOCOL.md 5.4). Returns FALSE if it cannot be parsed.
+Bool ServersMatchStorePrivate( const char *payload );
+
+/// Member: TRUE once a usable private start message has been stored for this start.
+Bool ServersMatchHasPrivate();
+
+/// Forgets any stored private start message. Called when a staging room is entered.
+void ServersMatchForgetPrivate();
+
+/**
+ * Host: builds the private message payload for one slot, "<session_id>/<slot>/<join_token>" (PROTOCOL.md 5.4).
+ * Returns FALSE if the handshake holds no join token for that slot.
+ */
+Bool ServersMatchBuildPrivate( UnsignedByte slot, AsciiString &outPayload );
+
+/// Call once per frame while a handshake is running. Does not block. Polls the link and drives the box.
+ServersMatchResult ServersMatchUpdate();
+
+/// The connected relay link, for the networking code to borrow at match launch. Null when there is no match link.
+ServerLink *ServersMatchLink();
+
+/// Closes and frees the handshake link and the box. Leaves any stored private message untouched.
+void ServersMatchAbort();
+
 #endif // RTS_SERVERS

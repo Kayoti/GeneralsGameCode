@@ -39,6 +39,9 @@
 #include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/udp.h"
 #include "GameNetwork/Transport.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/GameSpy/ServersMode.h"
+#endif
 #include "WWLib/strtok_r.h"
 #include "GameClient/Shell.h"
 #include "Common/CRCDebug.h"
@@ -410,6 +413,21 @@ void Network::parseUserList( const GameInfo *game )
 		DEBUG_LOG(("FAILED parseUserList with a null game"));
 		return;
 	}
+
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 Hand the staging room's connected relay link to the connection
+	// manager before it builds the slot list, so a Servers match runs through the relay instead of UDP paths.
+	// This is the "after init, before parseUserList" wiring the server mode record path needs.
+	if (ServersModeIsOn())
+	{
+		ServerLink *link = ServersMatchLink();
+		if (link != nullptr)
+		{
+			m_conMgr->attachServerLink(link);
+			m_conMgr->setServerMode(TRUE);
+		}
+	}
+#endif
 
 	m_conMgr->parseUserList(game);
 
