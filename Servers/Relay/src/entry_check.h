@@ -3,12 +3,11 @@
 #pragma once
 
 #include "pass.h"
+#include "rate_limit.h"
 #include "region_keys.h"
 
 #include <cstddef>
 #include <cstdint>
-#include <map>
-#include <vector>
 
 namespace relay {
 
@@ -19,7 +18,6 @@ const std::uint32_t ANSWER_WINDOW_MS = 4000;
 const std::size_t MIN_ANSWERS = 5;
 
 // PROTOCOL.md 6.
-const std::uint32_t RATE_WINDOW_MS = 60000;
 const std::size_t ENTRY_CHECKS_PER_WINDOW = 6;
 
 // Values the entry check takes from the relay configuration and the region key.
@@ -71,20 +69,6 @@ private:
   Ping m_pings[PING_COUNT];
   std::size_t m_sent = 0;
   std::uint32_t m_start_ms = 0;
-};
-
-// Counts entry checks per source address in a sliding window (PROTOCOL.md 6).
-class AddressRateLimiter {
-public:
-  // Records an entry check from address at now_ms. Returns false, without recording it, when the address has used
-  // its checks for the window.
-  bool Allow(std::uint32_t address, std::uint32_t now_ms);
-
-private:
-  void Sweep(std::uint32_t now_ms);
-
-  std::map<std::uint32_t, std::vector<std::uint32_t>> m_recent;
-  std::uint32_t m_last_sweep_ms = 0;
 };
 
 // Hook for the VPN check (package A3). Returns false when the address is flagged. Until A3 is built, every address

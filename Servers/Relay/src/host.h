@@ -1,12 +1,15 @@
-// The relay's ENet host: listens for connections, logs them, enforces the first-message deadline
-// (PROTOCOL.md 4.1 and 6) and runs the entry check (PROTOCOL.md 4.4).
+// The relay's ENet host: listens for connections, enforces the first-message deadline and limits
+// (PROTOCOL.md 4.1 and 6), runs the entry check (PROTOCOL.md 4.4) and hands session messages to the session manager.
 #pragma once
 
 #include "entry_check.h"
+#include "rate_limit.h"
+#include "sessions.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 
 struct _ENetEvent;
 struct _ENetHost;
@@ -14,9 +17,11 @@ struct _ENetPeer;
 
 namespace relay {
 
-class RelayHost {
+class RelayHost : private SessionOutput {
 public:
-  RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings);
+  // check_address is false only with the relay's test start option. max_sessions is the concurrent session limit.
+  RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings, bool check_address,
+            std::size_t max_sessions);
   ~RelayHost();
 
   RelayHost(const RelayHost &) = delete;
@@ -31,6 +36,12 @@ public:
 private:
   struct Connection;
 
+  // SessionOutput.
+  void Send(std::uint32_t connection, const unsigned char *message, std::size_t length) override;
+  void Close(std::uint32_t connection) override;
+
+  bool AdmitConnection(const _ENetPeer *peer) const;
+  void HandleFirstMessage(_ENetPeer *peer, Connection &connection, const unsigned char *data, std::size_t length);
   void Dispatch(const _ENetEvent &event);
   void OnConnect(_ENetPeer *peer);
   void OnDisconnect(_ENetPeer *peer);
@@ -54,6 +65,9 @@ private:
   _ENetHost *host_;
   EntryCheckSettings settings_;
   AddressRateLimiter rate_limiter_;
+  std::size_t session_limit_;
+  SessionManager sessions_;
+  std::unordered_map<std::uint32_t, _ENetPeer *> peers_by_connection_;
 };
 
 } // namespace relay

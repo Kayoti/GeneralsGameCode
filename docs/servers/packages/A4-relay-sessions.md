@@ -1,6 +1,6 @@
 # A4 Relay: sessions
 
-State: todo
+State: done
 Branch: servers-A4
 
 ## Goal
@@ -25,17 +25,17 @@ Anything outside `Servers/Relay/`.
 
 ## Done when
 
-- [ ] `CREATE` is accepted only with a valid pass, `host_slot` inside `slot_mask`, and at least one other bit set. Otherwise `REFUSE` `BAD_REQUEST` or the pass code that applies.
-- [ ] An accepted `CREATE` makes a session with a random 64-bit id and one random 64-bit join token per other expected slot, binds the connection to `host_slot`, and replies `CREATED` then `WELCOME`.
-- [ ] `JOIN` is accepted only when every condition in PROTOCOL.md 4.5 step 5 holds. Each failure maps to its own `REFUSE` code, including `ALREADY_STARTED` and `BAD_TOKEN`. A token is used up by a successful join.
-- [ ] A `pass_id` already in use by a live match connection gets `REFUSE` `PASS_IN_USE`.
-- [ ] `ROSTER` is sent to all connected players on every change.
-- [ ] `START` is sent once, when all expected slots are connected, or 30 seconds after `CREATED`. In the second case a `DROP` with `NEVER_JOINED` and `last_frame` 29 is sent for each missing slot first. With fewer than 2 connected players everyone gets `REFUSE` `NOT_ENOUGH_PLAYERS`.
-- [ ] `leader_slot` is always the lowest connected slot.
-- [ ] A session with no connected player is removed and its memory released.
-- [ ] The limits in PROTOCOL.md 6 for `CREATE`, `JOIN`, failed joins per session, concurrent sessions and connections without a first message are enforced.
-- [ ] Random values come from the operating system's secure source.
-- [ ] The test client from A2 gains modes to create and join a session.
+- [x] `CREATE` is accepted only with a valid pass, `host_slot` inside `slot_mask`, and at least one other bit set. Otherwise `REFUSE` `BAD_REQUEST` or the pass code that applies.
+- [x] An accepted `CREATE` makes a session with a random 64-bit id and one random 64-bit join token per other expected slot, binds the connection to `host_slot`, and replies `CREATED` then `WELCOME`.
+- [x] `JOIN` is accepted only when every condition in PROTOCOL.md 4.5 step 5 holds. Each failure maps to its own `REFUSE` code, including `ALREADY_STARTED` and `BAD_TOKEN`. A token is used up by a successful join.
+- [x] A `pass_id` already in use by a live match connection gets `REFUSE` `PASS_IN_USE`.
+- [x] `ROSTER` is sent to all connected players on every change.
+- [x] `START` is sent once, when all expected slots are connected, or 30 seconds after `CREATED`. In the second case a `DROP` with `NEVER_JOINED` and `last_frame` 29 is sent for each missing slot first. With fewer than 2 connected players everyone gets `REFUSE` `NOT_ENOUGH_PLAYERS`.
+- [x] `leader_slot` is always the lowest connected slot.
+- [x] A session with no connected player is removed and its memory released.
+- [x] The limits in PROTOCOL.md 6 for `CREATE`, `JOIN`, failed joins per session, concurrent sessions and connections without a first message are enforced.
+- [x] Random values come from the operating system's secure source.
+- [x] The test client from A2 gains modes to create and join a session.
 - [ ] Reviewed by someone other than the author.
 
 ## Out of scope
@@ -45,6 +45,31 @@ Forwarding records (A5). Removing players during a match (A6).
 ## Handoff notes
 
 - Finished:
+  - `Servers/Relay/src/sessions.h`, `sessions.cpp`: `SessionManager`. It has no ENet dependency and writes through a `SessionOutput` interface, so the unit tests drive it directly. It implements CREATE (pass, `host_slot` in `slot_mask`, at least one other bit, `SERVER_BUSY` above `max_sessions`), `CREATED` then `WELCOME`, JOIN (the 4.5 step 5 checks, each with its own `REFUSE` code), `ROSTER` on every change, `START` when all expected slots are connected, the 30 second timer (`DROP` `NEVER_JOINED` with `last_frame` 29 per missing slot, then `START`, or `REFUSE` `NOT_ENOUGH_PLAYERS` when fewer than 2 are connected), `leader_slot` as the lowest connected slot, and removal of a session when its last player goes. The `pass_id` registry (`PASS_IN_USE`) is a set of ids held by bound connections. A connection is bound to its slot when the pass is accepted, and the manager keeps the connection id to slot map.
+  - `Servers/Relay/src/rate_limit.h`, `rate_limit.cpp`: per-address sliding window used for `CREATE` (6/min) and `JOIN` (12/min).
+  - `Servers/Relay/src/wire.h`: little-endian helpers. `pass.cpp` now uses them instead of its own copies.
+  - `Servers/Relay/src/host.*`, `main.cpp`: the host passes CREATE and JOIN to the manager, sends and closes on the manager's behalf (`enet_peer_disconnect_later` after a `REFUSE`), forwards `LEAVE` from a bound connection, calls `Tick` every service loop, and enforces the first-message limits (4 per address, 256 in total; extra connections are dropped at connect). `RelayHost` now takes `SessionSettings`.
+  - `Servers/Relay/src/protocol.h`: added message body sizes for the messages the relay sends, the session limits from section 6, and renamed `MAX_PEERS` to `MAX_UNCHECKED_CONNECTIONS`.
+  - `Servers/Relay/tools/session_client.cpp` (CMake target `session_client`): `create`, `join` and `idle` modes. It signs its own pass from the region key file, so it works against any relay started with that key.
+  - `Servers/Relay/tests/relay_tests.cpp`: tests for validation, every JOIN refusal, token use, pass id reuse, roster and start, the timeout both ways, leader, session release, session and address limits, failed joins per session, and random values.
 - Left to do:
+  - Review by someone other than the author.
+  - Records after the first message are still dropped with a log line (A5). Only `LEAVE` is handled. Attribution of records to the bound slot is available through `SessionManager` bindings, but no code reads it yet.
+  - After `START`, a `LEAVE` or lost connection sends `ROSTER` only. The `DROP` and clean-leave rules of PROTOCOL.md 4.7 belong to A6.
+  - The entry check (`CHECK_HELLO`) is A2. The host still only logs it. The two packages both edit `host.cpp` and `main.cpp`, so the second to merge may need a rebase.
 - Surprises and open questions:
+  - Package item "The test client from A2 gains modes to create and join": A2 has no commits and no client on `servers`, so there was nothing to extend. `tools/session_client.cpp` is a separate tool. If A2's client lands, the two can be merged or kept side by side.
+  - The pass in the test client is signed locally with the key file, because the entry check does not exist yet. It also needs the relay started with `--no-address-check` when the client's source address is not the one written in the pass (`--ip`).
+  - PROTOCOL.md does not say which `REFUSE` code applies once a session has refused 32 failed joins. `RATE_LIMITED` is used. A `JOIN` that arrives for a started session still gets `ALREADY_STARTED` first.
+  - PROTOCOL.md does not say whether the joining player also gets a `ROSTER`. Everyone connected, including the joiner, gets `ROSTER` after `WELCOME`, which is the literal reading of "sent to all connected players on every change".
+  - At the 30 second timeout every expected slot that is not connected gets `DROP` `NEVER_JOINED`, including a slot whose player joined and left before `START`. PROTOCOL.md names `NEVER_JOINED` for "expected slot never connected" only.
+  - A token that was used is zeroed, so a second `JOIN` for a slot whose first player has left gets `BAD_TOKEN`. A slot that is currently connected gets `SLOT_TAKEN`. A wrong build number does not use the token up.
+  - `MAX_PEERS` (256) was also the whole ENet peer table, which would cap all connections including in-match ones at 256. The peer table is now 256 plus 8 per allowed session, and `Start` fails with a message if `max_sessions` would need more than ENet's 4095 peers (more than 479 sessions).
+  - Failed-join counting covers refusals after the session is found and the pass accepted (`BAD_REQUEST` slot, `NOT_EXPECTED`, `SLOT_TAKEN`, `BAD_TOKEN`, `BUILD_MISMATCH`). Pass failures and `NO_SESSION` do not count, since they are not tied to the session.
+  - PROTOCOL.md section 10 assumptions V1 to V8 are not touched by this package.
+- Verification:
+  - Relay built with `cmake -S Servers/Relay -B <build dir> -G Ninja -DCMAKE_BUILD_TYPE=Release -DRELAY_BUILD_TESTS=ON` in the VS x86 environment, warnings as errors on relay code, build exit 0. `ctest` passed (`relay_tests`).
+  - Live run on one PC (relay with `--no-address-check`, port 17777): create plus two joins gave `WELCOME`, `ROSTER`, `ROSTER`, `START` in order on all three; 4 expected with 2 connected gave `ROSTER`, `DROP` slot 1, `DROP` slot 3 (`NEVER_JOINED`, `last_frame` 29), `START` after 30 s; host alone gave `REFUSE` 17 after 30 s; a second `CREATE` with the same pass id gave `REFUSE` 9; the `idle` mode with 6 connections kept 4 and the relay logged the refusals.
+  - `clang-format --dry-run --Werror` and `clang-tidy` 22.1.3 with the root `.clang-tidy` on `sessions.cpp`, `rate_limit.cpp`, `host.cpp`, `pass.cpp`, `main.cpp`, `tools/session_client.cpp`, `tests/relay_tests.cpp`: 0 warnings.
+  - Not run: more than 1 address in a live test (all clients were 127.0.0.1), the 256 total limit, and the address check switched on.
 - Review findings and fixes:

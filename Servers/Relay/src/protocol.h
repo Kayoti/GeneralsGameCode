@@ -71,12 +71,30 @@ const std::size_t REFUSE_BODY_SIZE = 1 + 2 + 2;               // code, rtt_ms, l
 const std::size_t CREATE_BODY_SIZE = 2 + PASS_SIZE + 1 + 1;   // proto, pass, host_slot, slot_mask
 const std::size_t JOIN_BODY_SIZE = 2 + PASS_SIZE + 8 + 1 + 8; // proto, pass, session_id, slot, join_token
 
+// Body sizes of the messages the relay sends for a session (PROTOCOL.md 4.2), not counting the type byte.
+const std::size_t SLOT_COUNT = 8;                         // Players per session (PROTOCOL.md 6).
+const std::size_t CREATED_BODY_SIZE = 8 + SLOT_COUNT * 8; // session_id, join_token per slot
+const std::size_t WELCOME_BODY_SIZE = 8 + 1 + 1 + 1;      // session_id, slot, connected_mask, leader_slot
+const std::size_t ROSTER_BODY_SIZE = 1 + 1;               // connected_mask, leader_slot
+const std::size_t START_BODY_SIZE = 1 + 1;                // connected_mask, leader_slot
+const std::size_t DROP_BODY_SIZE = 1 + 1 + 4;             // slot, reason, last_frame
+
+// Session limits (PROTOCOL.md 4.5, 4.7 and 6).
+const std::uint32_t SESSION_START_WAIT_MS = 30000; // Wait for all players after CREATED.
+const std::uint32_t NEVER_JOINED_LAST_FRAME = 29;  // last_frame of a slot that never sent a FRAMEINFO.
+const std::size_t CREATE_PER_ADDRESS_PER_MINUTE = 6;
+const std::size_t JOIN_PER_ADDRESS_PER_MINUTE = 12;
+const std::uint32_t RATE_WINDOW_MS = 60000;
+const std::size_t FAILED_JOINS_PER_SESSION = 32;
+const std::size_t UNCHECKED_CONNECTIONS_PER_ADDRESS = 4; // Connections that have not sent a first message.
+
 // PROTOCOL.md 4.1 and 6.
 const std::uint32_t CHANNEL_COUNT = 2;
 const std::uint32_t FIRST_MESSAGE_DEADLINE_MS = 5000;
 // The ENet host's maximum packet size and waiting-data limits in host.cpp are derived from MAX_MESSAGE_SIZE.
 const std::size_t MAX_MESSAGE_SIZE = 16384; // DATA message limit (PROTOCOL.md 6).
-// Peer slots in the ENet host. PROTOCOL.md 6 allows 256 connections in total that have not sent a first message.
-const std::size_t MAX_PEERS = 256;
+// PROTOCOL.md 6 allows 256 connections in total that have not sent a first message. The ENet host has this many
+// peer slots in addition to SLOT_COUNT for every allowed session.
+const std::size_t MAX_UNCHECKED_CONNECTIONS = 256;
 
 } // namespace relay

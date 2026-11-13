@@ -86,8 +86,12 @@ add_library(relay_core STATIC
     src/pass.cpp
     src/pass.h
     src/protocol.h
+    src/rate_limit.cpp
+    src/rate_limit.h
     src/region_keys.cpp
     src/region_keys.h
+    src/sessions.cpp
+    src/sessions.h
     src/text.h
     src/wire.h
 )
@@ -105,6 +109,12 @@ target_compile_options(relay PRIVATE /W4 /WX)
 add_executable(entry_check_client tools/entry_check_client.cpp)
 target_link_libraries(entry_check_client PRIVATE relay_core ws2_32 winmm)
 target_compile_options(entry_check_client PRIVATE /W4 /WX)
+
+# Test client for sessions: creates or joins a session and prints what the relay sends.
+add_executable(session_client tools/session_client.cpp)
+target_link_libraries(session_client PRIVATE relay_core ws2_32 winmm)
+target_compile_definitions(session_client PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(session_client PRIVATE /W4 /WX)
 
 if(RELAY_BUILD_TESTS)
     enable_testing()

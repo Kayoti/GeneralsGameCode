@@ -70,21 +70,36 @@ void SendMessage(ENetPeer *peer, const unsigned char *data, std::size_t length) 
   }
 }
 
+// Settings of the session manager. It checks passes with the public half of the region key held in settings.
+SessionSettings MakeSessionSettings(const EntryCheckSettings &settings, bool check_address, std::size_t max_sessions) {
+  SessionSettings session_settings;
+  session_settings.public_key = settings.key.public_key;
+  session_settings.region = settings.region;
+  session_settings.check_address = check_address;
+  session_settings.max_sessions = max_sessions;
+  return session_settings;
+}
+
 } // namespace
 
 // Per-connection state, stored in ENetPeer::data while the peer is connected.
 struct RelayHost::Connection {
   std::uint32_t m_id = 0;
   std::uint32_t m_connected_at_ms = 0;
+  std::uint32_t m_source_ip = 0; // Host-order IPv4 address.
   bool m_first_message_seen = false;
+  bool m_closing = false;
   EntryState m_entry_state = EntryState::NONE;
   std::uint32_t m_exe_crc = 0;
   std::uint32_t m_ini_crc = 0;
   PingRound m_round;
 };
 
-RelayHost::RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings)
-    : listen_port_(listen_port), next_connection_id_(1), host_(nullptr), settings_(settings) {}
+RelayHost::RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings, bool check_address,
+                     std::size_t max_sessions)
+    : listen_port_(listen_port), next_connection_id_(1), host_(nullptr), settings_(settings),
+      rate_limiter_(ENTRY_CHECKS_PER_WINDOW, RATE_WINDOW_MS), session_limit_(max_sessions),
+      sessions_(MakeSessionSettings(settings_, check_address, max_sessions), *this) {}
 
 RelayHost::~RelayHost() {
   if (host_ == nullptr) {
@@ -102,7 +117,15 @@ bool RelayHost::Start(std::string &error) {
   address.host = ENET_HOST_ANY;
   address.port = listen_port_;
 
-  host_ = enet_host_create(&address, MAX_PEERS, CHANNEL_COUNT, 0, 0);
+  // PROTOCOL.md 6 allows MAX_UNCHECKED_CONNECTIONS connections without a first message. Every session may also
+  // hold SLOT_COUNT connections, so connections inside matches never take those places.
+  const std::size_t PEER_COUNT = MAX_UNCHECKED_CONNECTIONS + (SLOT_COUNT * session_limit_);
+  if (PEER_COUNT > ENET_PROTOCOL_MAXIMUM_PEER_ID) {
+    error = "max_sessions is too large, at most " +
+            std::to_string((ENET_PROTOCOL_MAXIMUM_PEER_ID - MAX_UNCHECKED_CONNECTIONS) / SLOT_COUNT) + " are supported";
+    return false;
+  }
+  host_ = enet_host_create(&address, PEER_COUNT, CHANNEL_COUNT, 0, 0);
   if (host_ == nullptr) {
     error = "cannot open UDP port " + std::to_string(listen_port_);
     return false;
@@ -128,6 +151,7 @@ bool RelayHost::Run() {
     }
     CheckFirstMessageDeadlines();
     ServiceEntryChecks();
+    sessions_.Tick(enet_time_get());
   }
 }
 
@@ -148,13 +172,38 @@ void RelayHost::Dispatch(const ENetEvent &event) {
   }
 }
 
+bool RelayHost::AdmitConnection(const ENetPeer *peer) const {
+  std::size_t unchecked_total = 0;
+  std::size_t unchecked_from_address = 0;
+  for (std::size_t i = 0; i < host_->peerCount; ++i) {
+    const ENetPeer *other = &host_->peers[i];
+    const Connection *connection = static_cast<const Connection *>(other->data);
+    if (other == peer || connection == nullptr || connection->m_first_message_seen || connection->m_closing) {
+      continue;
+    }
+    ++unchecked_total;
+    if (other->address.host == peer->address.host) {
+      ++unchecked_from_address;
+    }
+  }
+  return unchecked_total < MAX_UNCHECKED_CONNECTIONS && unchecked_from_address < UNCHECKED_CONNECTIONS_PER_ADDRESS;
+}
+
 void RelayHost::OnConnect(ENetPeer *peer) {
+  if (!AdmitConnection(peer)) {
+    LogLine("connection refused: too many connections without a first message");
+    enet_peer_disconnect_now(peer, 0);
+    return;
+  }
   Connection *connection = new Connection();
   connection->m_id = next_connection_id_++;
   connection->m_connected_at_ms = enet_time_get();
+  connection->m_source_ip = ClientAddress(peer);
   connection->m_first_message_seen = false;
+  connection->m_closing = false;
   connection->m_entry_state = EntryState::NONE;
   peer->data = connection;
+  peers_by_connection_[connection->m_id] = peer;
   LogLine("connection %u opened", connection->m_id);
 }
 
@@ -164,13 +213,53 @@ void RelayHost::OnDisconnect(ENetPeer *peer) {
     return;
   }
   LogLine("connection %u closed", connection->m_id);
+  sessions_.OnClosed(connection->m_id);
+  peers_by_connection_.erase(connection->m_id);
   delete connection;
   peer->data = nullptr;
 }
 
+void RelayHost::Send(std::uint32_t connection, const unsigned char *message, std::size_t length) {
+  auto found = peers_by_connection_.find(connection);
+  if (found != peers_by_connection_.end()) {
+    SendMessage(found->second, message, length);
+  }
+}
+
+void RelayHost::Close(std::uint32_t connection) {
+  auto found = peers_by_connection_.find(connection);
+  if (found == peers_by_connection_.end()) {
+    return;
+  }
+  Connection *state = static_cast<Connection *>(found->second->data);
+  if (state != nullptr) {
+    state->m_closing = true;
+  }
+  enet_peer_disconnect_later(found->second, 0);
+}
+
+void RelayHost::HandleFirstMessage(ENetPeer *peer, Connection &connection, const unsigned char *data,
+                                   std::size_t length) {
+  connection.m_first_message_seen = true;
+  LogLine("connection %u: first message type %u accepted", connection.m_id, static_cast<unsigned int>(data[0]));
+
+  SessionRequest request;
+  request.connection = connection.m_id;
+  request.source_ip = connection.m_source_ip;
+  request.now_ms = enet_time_get();
+  request.now_unix = static_cast<std::uint32_t>(std::time(nullptr));
+  if (data[0] == MSG_CHECK_HELLO) {
+    OnCheckHello(peer, &connection, data);
+  } else if (data[0] == MSG_CREATE) {
+    sessions_.OnCreate(request, data + 1, length - 1);
+  } else if (data[0] == MSG_JOIN) {
+    sessions_.OnJoin(request, data + 1, length - 1);
+  }
+}
+
 void RelayHost::OnReceive(ENetPeer *peer, std::uint8_t channel_id, const unsigned char *data, std::size_t length) {
   Connection *connection = static_cast<Connection *>(peer->data);
-  if (connection == nullptr) {
+  if (connection == nullptr || connection->m_closing) {
     return;
   }
   if (channel_id != MESSAGE_CHANNEL) {
@@ -188,18 +277,18 @@ void RelayHost::OnReceive(ENetPeer *peer, std::uint8_t channel_id, const unsigne
               static_cast<unsigned int>(data[0]));
       return;
     }
-    connection->m_first_message_seen = true;
-    LogLine("connection %u: first message type %u accepted", connection->m_id, static_cast<unsigned int>(data[0]));
-    if (data[0] == MSG_CHECK_HELLO) {
-      OnCheckHello(peer, connection, data);
-    }
+    HandleFirstMessage(peer, *connection, data, length);
     return;
   }
   if (data[0] == MSG_PONG && length == 1 + PONG_BODY_SIZE && connection->m_entry_state == EntryState::MEASURING) {
     OnPong(connection, data + 1);
     return;
   }
-  // Handling of other messages after the first one is added by later packages (sessions).
+  if (data[0] == MSG_LEAVE && length == 1 && sessions_.IsBound(connection->m_id)) {
+    sessions_.OnLeave(connection->m_id);
+    return;
+  }
+  // Records are added by a later package (A5).
   LogLine("connection %u: message type %u dropped, no handler in this build", connection->m_id,
           static_cast<unsigned int>(data[0]));
 }

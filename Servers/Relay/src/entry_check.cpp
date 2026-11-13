@@ -10,17 +10,6 @@
 
 namespace relay {
 
-namespace {
-
-// Removes the timestamps that are no longer inside the rate window. Timestamps are stored in increasing order.
-void DropExpired(std::vector<std::uint32_t> &times, std::uint32_t now_ms) {
-  auto first_live =
-      std::find_if(times.begin(), times.end(), [now_ms](std::uint32_t time) { return now_ms - time < RATE_WINDOW_MS; });
-  times.erase(times.begin(), first_live);
-}
-
-} // namespace
-
 void PingRound::Start(std::uint32_t now_ms) {
   m_start_ms = now_ms;
   m_sent = 0;
@@ -86,32 +75,6 @@ EntryVerdict PingRound::Verdict(std::uint16_t limit_ms, std::uint16_t &median_ms
   std::uint32_t middle = count % 2 == 1 ? answers[upper] : (answers[upper - 1] + answers[upper]) / 2;
   median_ms = static_cast<std::uint16_t>(middle);
   return median_ms > limit_ms ? EntryVerdict::PING_TOO_HIGH : EntryVerdict::PASS;
-}
-
-bool AddressRateLimiter::Allow(std::uint32_t address, std::uint32_t now_ms) {
-  if (now_ms - m_last_sweep_ms >= RATE_WINDOW_MS) {
-    Sweep(now_ms);
-  }
-
-  std::vector<std::uint32_t> &times = m_recent[address];
-  DropExpired(times, now_ms);
-  if (times.size() >= ENTRY_CHECKS_PER_WINDOW) {
-    return false;
-  }
-  times.push_back(now_ms);
-  return true;
-}
-
-void AddressRateLimiter::Sweep(std::uint32_t now_ms) {
-  for (auto it = m_recent.begin(); it != m_recent.end();) {
-    DropExpired(it->second, now_ms);
-    if (it->second.empty()) {
-      it = m_recent.erase(it);
-    } else {
-      ++it;
-    }
-  }
-  m_last_sweep_ms = now_ms;
 }
 
 bool VpnCheckPasses(std::uint32_t address) {
