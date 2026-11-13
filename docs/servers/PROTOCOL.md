@@ -65,11 +65,11 @@ A connection has one of three purposes, set by its first message, which must arr
 | 1 | `CHECK_HELLO` | client to relay | `u16 proto`, `u32 exe_crc`, `u32 ini_crc` |
 | 2 | `PING` | relay to client | `u64 nonce` |
 | 3 | `PONG` | client to relay | `u64 nonce`, copied from `PING` |
-| 4 | `PASS` | relay to client | 96-byte pass (4.3). The relay disconnects after sending. |
+| 4 | `PASS` | relay to client | 100-byte pass (4.3). The relay disconnects after sending. |
 | 5 | `REFUSE` | relay to client | `u8 code` (4.9), `u16 rtt_ms`, `u16 limit_ms`. Both values are 0 unless the code is `PING_TOO_HIGH`. The relay disconnects after sending. |
-| 6 | `CREATE` | client to relay | `u16 proto`, 96-byte pass, `u8 host_slot`, `u8 slot_mask` |
+| 6 | `CREATE` | client to relay | `u16 proto`, 100-byte pass, `u8 host_slot`, `u8 slot_mask` |
 | 7 | `CREATED` | relay to client | `u64 session_id`, 8 × `u64 join_token` (index = slot; 0 for slots not in `slot_mask` and for the host slot) |
-| 8 | `JOIN` | client to relay | `u16 proto`, 96-byte pass, `u64 session_id`, `u8 slot`, `u64 join_token` |
+| 8 | `JOIN` | client to relay | `u16 proto`, 100-byte pass, `u64 session_id`, `u8 slot`, `u64 join_token` |
 | 9 | `WELCOME` | relay to client | `u64 session_id`, `u8 slot`, `u8 connected_mask`, `u8 leader_slot` |
 | 10 | `ROSTER` | relay to client | `u8 connected_mask`, `u8 leader_slot`. Sent on every change. |
 | 11 | `START` | relay to client | `u8 connected_mask`, `u8 leader_slot`. Sent once. |
@@ -98,7 +98,7 @@ A pass states that the relay checked this player. The relay signs it with Ed2551
 | `pass_id` | u64 | Random |
 | `signature` | 64 bytes | Ed25519 over all fields above |
 
-Total 96 bytes. Lifetime 10 minutes.
+Total 100 bytes. Lifetime 10 minutes.
 
 A pass is accepted when: the signature is valid, `version` is known, `region` is this relay's region, it has not expired by the relay's clock, the UDP source address equals `client_ip`, and no other live match connection is using the same `pass_id`.
 
