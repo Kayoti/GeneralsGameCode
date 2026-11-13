@@ -1,6 +1,6 @@
 # C1 Client: ENet relay link, entry check client and server mode in connection setup
 
-State: blocked
+State: todo
 Branch: servers-C1
 
 ## Goal
@@ -48,9 +48,9 @@ Sending game commands (C2). Menus (D1).
 
 ## Handoff notes
 
-- Finished: nothing yet. Work did not start because the pass layout is not settled (see below).
-- Left to do: the whole package, once the pass size is resolved.
+- Finished:
+- Left to do:
 - Surprises and open questions:
-  - Blocking: PROTOCOL.md section 4.3 is internally inconsistent about the pass size. The field table totals 100 bytes, but the section says "Total 96 bytes" and section 4.2 describes PASS, CREATE and JOIN as carrying a "96-byte pass". The client must read `issued_at`/`expires_at` from the pass and size the CREATE, JOIN and PASS bodies exactly, so the size cannot be guessed. Resolve on the `servers` branch (see A1's note for the byte breakdown and the likely cause). The same decision unblocks A1.
-  - Design proposed for when work resumes: a small static library `core_serverlink` with no precompiled header, so ENet's `winsock2.h` does not clash with the engine's `windows.h`/`winsock.h`; ENet headers included only inside the new `.cpp` files. The server-mode flag on `ConnectionManager` is reachable from callers only through a setter on `NetworkInterface.h`; that file is not in C1's edit list, so C2 or 2.1 adds the setter.
+  - The pass is 100 bytes (PROTOCOL.md 4.3 corrected). The client sizes the PASS, CREATE and JOIN bodies against 100.
+  - Design proposed for when building: a small static library `core_serverlink` with no precompiled header, so ENet's `winsock2.h` does not clash with the engine's `windows.h`/`winsock.h`; ENet headers included only inside the new `.cpp` files. The server-mode flag on `ConnectionManager` is reachable from callers only through a setter on `NetworkInterface.h`; that file is not in C1's edit list, so C2 or 2.1 adds the setter.
 - Review findings and fixes:
