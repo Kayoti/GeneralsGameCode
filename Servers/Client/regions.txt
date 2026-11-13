@@ -1,0 +1,18 @@
+# Region file for Servers mode. Format: docs/servers/PROTOCOL.md, section 7.1.
+# Blocks are read in order, and that order decides ties.
+
+[region]
+number    = 1
+name      = Europe
+relay     = eu.relay.example.net:7777
+tag       = srv-eu
+tag_port  = 1
+
+# To add a region, copy a block and change its values. Example:
+#
+# [region]
+# number    = 2
+# name      = North America
+# relay     = na.relay.example.net:7777
+# tag       = srv-na
+# tag_port  = 1
