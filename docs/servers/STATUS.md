@@ -46,7 +46,7 @@ D1 needs only the two headers that C1 defines, so tracks C and D can start toget
 | [A4](packages/A4-relay-sessions.md) | Relay: sessions (create, join, roster, start) | A1 | todo |
 | [A5](packages/A5-relay-records.md) | Relay: record validation and forwarding | A4 | todo |
 | [A6](packages/A6-relay-drop.md) | Relay: timeouts and dropping players | A5 | todo |
-| [C1](packages/C1-client-link.md) | Client: ENet relay link, entry check client and server mode in connection setup | 0.1, 0.2, 0.3 | todo |
+| [C1](packages/C1-client-link.md) | Client: ENet relay link, entry check client and server mode in connection setup | 0.1, 0.2, 0.3 | done |
 | [C2](packages/C2-client-records.md) | Client: commands sent and received as records, player drop from the server | C1 | todo |
 | [C3](packages/C3-client-flags.md) | Client: launch flags to create or join a relay match directly | C1 | todo |
 | [D1](packages/D1-servers-button.md) | Lobby: Servers button, entry check on entry, refusal messages | 0.2, 0.3, C1 | todo |
@@ -98,3 +98,4 @@ Phase 1 gate:
 | 2026-11-13 | A1 and C1 blocked: PROTOCOL.md section 4.3 is inconsistent on the pass size. The field table totals 100 bytes, but the text says 96 and section 4.2 repeats "96-byte pass". The pass byte layout must be fixed on `servers` before the relay pass module (A1) and the client entry check and link (C1) can be written. Details in each package's handoff notes. |
 | 2026-11-13 | Pass size resolved to 100 bytes (section 4.3), matching the field table. The three "96-byte pass" references in 4.2 and the "Total 96 bytes" line are corrected. CREATE body is 104 bytes, JOIN is 119. A1 and C1 reopened. |
 | 2026-11-13 | Relay host merged (A1): standalone ENet relay in `Servers/Relay/` that reads its config, signs and checks the 100-byte pass, generates region keys, and disconnects connections with no valid first message. ENet and libsodium pinned. Incoming packets bounded to the message limit and to channel 0. Builds and unit tests pass. |
+| 2026-11-13 | Client relay link merged (C1): `ServerRegions`, `ServerEntryCheck` and `ServerLink` in `Core/GameEngine/.../GameNetwork`, behind the Servers switch, with ENet pinned and isolated in `core_serverlink`. Headers are ENet-free for tracks C and D. `ConnectionManager` gains an off-by-default server-mode flag. Game builds with the switch on and off. V1 settled: ENet compiles with the game toolchain without clashing with the engine's winsock. |

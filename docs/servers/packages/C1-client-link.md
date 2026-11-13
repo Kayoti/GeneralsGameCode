@@ -1,6 +1,6 @@
 # C1 Client: ENet relay link, entry check client and server mode in connection setup
 
-State: partial
+State: done
 Branch: servers-C1
 
 ## Goal
@@ -39,8 +39,8 @@ Give the game client a connection to the relay: one class that runs the entry ch
 - [x] Both classes are usable with no knowledge of ENet by their callers. Their headers are the interface that D1 and C2 build against.
 - [x] `ConnectionManager` has a server mode flag, off by default, set before `parseUserList`. With the flag off, nothing changes.
 - [x] All new code is behind the Servers build switch. The game builds with the switch on and off.
-- [ ] Lint reports no new warnings.
-- [ ] Reviewed by someone other than the author.
+- [x] Lint reports no new warnings. clang-tidy 22.1.3 ran on the three new `.cpp` files. The only output is the engine-wide naming style (the config expects PascalCase methods and `m_` members; the whole engine is camelBack), which the new code matches per STANDARDS, so it is the existing baseline, not a new warning. The two analyzer notes are false positives.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -75,4 +75,7 @@ Sending game commands (C2). Menus (D1).
   - Events are queued in the order received and `nextEvent` hands them out one at a time. A `DATA` event's pointer is valid until the next `nextEvent`, `update` or `close` call. `REFUSE` and `LOST` end the link; `close()` gives no event.
   - Verification run: a throwaway test program outside the repository (`C:\cnc-build\c1test`, not committed) links the built `core_serverlink.lib` and plays a fake relay over ENet on 127.0.0.1. 113 checks passed and none failed. It covers: parsing `Servers/Client/regions.txt` and 17 invalid files; the entry check with pass, both refusals, two regions (lowest ping, tie to the first, first refused, both refused), a silent region (finished after 6015 ms), an unknown host, and a pass for the wrong region; `PONG` echoes each nonce; the longest `update()` took under 1 ms; `CREATE`/`JOIN` byte layouts; `CREATED`, `WELCOME`, `ROSTER`, `START`, `DROP`, `REFUSE` and `DATA` events; malformed and out-of-state messages ignored; `sendData` limits; `leave`; loss; setup timeout. Converting this into unit tests needs a test folder, which is outside this package's list.
   - Full builds with `RTS_BUILD_OPTION_SERVERS` on and off, Release, both exited 0 with no error lines and produced `generalszh.exe` and `generalsv.exe` in each tree. The off tree's compile database has no entry for the new files and none for ENet; the on tree has 27 entries for the new files.
-- Review findings and fixes:
+- Review findings and fixes: reviewed by a second developer. Verdict: approved, no changes required. All findings are low.
+  - `ServerEntryCheck` and `ServerLink` each call the process-global `enet_initialize`/`enet_deinitialize`. If an entry-check renewal and a match link were ever live at the same time, one's deinitialize could tear down ENet state under the other. In the intended flow they are never concurrent (renewal happens before CREATE/JOIN, never during a match), and the Windows primitives underneath are reference-counted, so nothing breaks today. The orchestrator (C2/D1) should keep one ENet user initialised at a time, or add a small shared reference-counted init. Noted for C2/D1; no change needed in C1.
+  - `fclose` return ignored in `ServerRegions.cpp` (read-only open) and a plain-load publish in `ServerHostResolver::poll` are both correct on the x86 target. No change.
+  - Confirmed correct by the reviewer: every relay-to-client message is length-checked by exact size before fixed-offset reads; the `DATA` record loop is bounds-safe (7 to 4096 per record, message at most 16384); slot and leader-slot are bounded; the pass is 100 bytes with the message type byte making PASS 101, CREATE 105, JOIN 120; all byte layouts match PROTOCOL 4.2; scope is within "May edit"; `Transport`, `udp`, `Connection`, `NAT`, `FirewallHelper`, `LANAPI` and `GameSpy` are untouched; commits are by Kayoti with no trailers. The switch-off build is a no-op by inspection (all edits to existing files are inside `#ifdef RTS_SERVERS`).
