@@ -83,6 +83,15 @@ bool ApplyKey(const std::string &key, const std::string &value, RelayConfig &con
   if (key == "max_sessions") {
     return ParseNumber(key, value, config.max_sessions, error);
   }
+  if (key == "loading_time_s") {
+    return ParseNumber(key, value, config.loading_time_s, error);
+  }
+  if (key == "stall_time_s") {
+    return ParseNumber(key, value, config.stall_time_s, error);
+  }
+  if (key == "connection_timeout_s") {
+    return ParseNumber(key, value, config.connection_timeout_s, error);
+  }
   if (key == "key_file") {
     return ParsePath(key, value, config.key_file, error);
   }

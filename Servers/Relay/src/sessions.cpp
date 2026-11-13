@@ -243,16 +243,22 @@ void SessionManager::AcceptJoin(const SessionRequest &request, std::uint64_t ses
   SendRoster(session);
   LogLine("connection %u joined slot %u", request.connection, static_cast<unsigned int>(slot));
   if (session.m_connected_mask == session.m_expected_mask) {
-    SendStart(session);
+    SendStart(session, request.now_ms);
   }
 }
 
 void SessionManager::OnLeave(std::uint32_t connection) {
+  if (DropIfMatchActive(connection, DROP_LEFT)) {
+    return;
+  }
   ReleaseConnection(connection);
   output_.Close(connection);
 }
 
-void SessionManager::OnClosed(std::uint32_t connection) {
+void SessionManager::OnClosed(std::uint32_t connection, bool connection_lost) {
+  if (DropIfMatchActive(connection, connection_lost ? DROP_TIMEOUT : DROP_LEFT)) {
+    return;
+  }
   ReleaseConnection(connection);
 }
 
@@ -321,17 +327,18 @@ void SessionManager::SendRoster(const Session &session) {
   SendToConnected(session, message, sizeof(message));
 }
 
-void SessionManager::SendStart(Session &session) {
+void SessionManager::SendStart(Session &session, std::uint32_t now_ms) {
   unsigned char message[1 + START_BODY_SIZE];
   message[0] = MSG_START;
   message[1] = session.m_connected_mask;
   message[2] = LeaderSlot(session.m_connected_mask);
   SendToConnected(session, message, sizeof(message));
   session.m_started = true;
+  session.m_started_ms = now_ms;
   LogLine("session started with %d players", CountBits(session.m_connected_mask));
 }
 
-void SessionManager::ExpireSession(std::uint64_t session_id, Session &session) {
+void SessionManager::ExpireSession(std::uint64_t session_id, Session &session, std::uint32_t now_ms) {
   if (CountBits(session.m_connected_mask) < 2) {
     LogLine("session ended before start: not enough players connected");
     for (std::size_t slot = 0; slot < SLOT_COUNT; ++slot) {
@@ -353,7 +360,7 @@ void SessionManager::ExpireSession(std::uint64_t session_id, Session &session) {
       SendToConnected(session, drop, sizeof(drop));
     }
   }
-  SendStart(session);
+  SendStart(session, now_ms);
 }
 
 void SessionManager::RemoveSession(std::uint64_t session_id) {
@@ -382,8 +389,14 @@ void SessionManager::Tick(std::uint32_t now_ms) {
   for (std::uint64_t session_id : expired) {
     auto found = sessions_.find(session_id);
     if (found != sessions_.end()) {
-      ExpireSession(session_id, found->second);
+      ExpireSession(session_id, found->second, now_ms);
     }
+  }
+
+  std::vector<PendingDrop> due;
+  CollectTimeouts(now_ms, due);
+  for (const PendingDrop &drop : due) {
+    DropConnection(drop.m_connection, drop.m_reason);
   }
 }
 

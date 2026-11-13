@@ -114,6 +114,7 @@ bool SessionManager::ProcessRecord(Session &session, std::uint8_t slot, std::uin
             AsUnsigned(header.m_command_count), AsUnsigned(outcome.m_counted));
   }
   records.CountForwarded();
+  NoteAccepted(session, slot, now_ms, header);
   ForwardRecord(session, outcome.m_forward_mask, record, length);
   return false;
 }

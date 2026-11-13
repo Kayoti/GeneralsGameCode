@@ -17,6 +17,10 @@ struct RelayConfig {
   std::string vpn_operators;
   std::string vpn_operator_db;
   std::string vpn_allow;
+  // Optional keys, in seconds. They hold the PROTOCOL.md section 6 defaults when the file does not set them.
+  std::uint16_t loading_time_s = 120;
+  std::uint16_t stall_time_s = 20;
+  std::uint16_t connection_timeout_s = 30;
 };
 
 // Parses the text of a configuration file. Blank lines and lines starting with '#' are skipped, whitespace
