@@ -16,8 +16,8 @@ Updated when packages merge into `servers`. The live state of a package is in it
 
 | Track | Owns |
 |---|---|
-| Main (phases 0 and 2) | `docs/servers/`, `cmake/` |
-| A. Relay server | `Servers/Relay/` (new) |
+| Main (phases 0 and 2) | `docs/servers/`, `cmake/`, `Servers/Client/` (client configuration files, such as the region file; first written in 0.3) |
+| A. Relay server | `Servers/Relay/` (created in 0.2 with a placeholder build file that the game build does not use) |
 | C. Client netcode | `Core/GameEngine/Source/GameNetwork/` and `Core/GameEngine/Include/GameNetwork/`, top level only, except `LANAPI*`, `NAT.*` and `FirewallHelper.*` |
 | D. Client lobby | `GameNetwork/GameSpy/` in `Core/`; `*/GameClient/GUI/` and `GameNetwork/GUIUtil.cpp` in `GeneralsMD/` and `Generals/` |
 
