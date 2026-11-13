@@ -262,6 +262,10 @@ ConnectionManager::ConnectionManager()
 	m_netCommandWrapperList = nullptr;
 	m_localUser = nullptr;
 	m_localUser = newInstance(User);
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 Initializes the server mode flag to off.
+	m_serverMode = FALSE;
+#endif
 }
 
 /**
