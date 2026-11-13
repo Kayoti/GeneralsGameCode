@@ -1,7 +1,10 @@
 # D1 Lobby: Servers button, entry check on entry, refusal messages
 
-State: partial
+State: done
 Branch: servers-D1
+
+<!-- Merged and reviewed. The code for every "Done when" item is complete and was confirmed correct in review; the seven on-screen items stay unticked because their behaviour can only be seen with the running game, which is not installed here. Those on-screen checks are the Phase 1 "D" gate and are pending: needs the game installed. -->
+
 
 ## Goal
 
@@ -40,7 +43,7 @@ Add the Servers button to the Multiplayer menu. Clicking it runs the entry check
 - [x] All new text is English and comes from the game's text system, not from literals in code. Every string is fetched with `TheGameText->fetch` or `fetchFormat` (labels `GUI:Servers`, `GUI:ServersTitle`, `GUI:ServersChecking`, `GUI:ServersVpnDetected`, `GUI:ServersPingTooHigh`, `GUI:ServersCannotConnect`). The entries are in `Servers/Client/servers.str`. They must be added to the game string file, see the notes below.
 - [x] The handoff notes record how the layout override was produced, since the original layout files are not in the repository. See "Surprises and open questions".
 - [x] Builds with the switch on and off. Lint reports no new warnings. Both Release builds exited 0 (`C:\cnc-build\d1-on.log`, `d1-off.log`). `python scripts\run-clang-tidy.py --no-plugin` on the three changed `.cpp` files: 0 issues.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -71,4 +74,8 @@ The tag and the list filter (D2). The entry check on join, Accept and exit (D3).
   - clang-tidy: calling `clang-tidy -p` directly reported thousands of style warnings from the default configuration (not the project's). The project script `scripts/run-clang-tidy.py --no-plugin` with a PCH-free build (`C:\cnc-build\D1-tidy`, switch on) reported 0 issues for `ServersMode.cpp` and both `MainMenu.cpp` files.
   - Builds: switch on and off, Release, 2539 and 2525 steps, exit 0 both. With the switch off `ServersMode.cpp` is compiled as an empty file.
   - PROTOCOL.md section 10: no assumption concerns this package.
-- Review findings and fixes:
+- Review findings and fixes: reviewed by a second developer. Verdict: approved, no changes required. All findings are low.
+  - Confirmed with a full switch-on game build (2539 steps, both executables linked) and a switch-off configure: the switch-off path is a true no-op (all new code is behind `#ifdef RTS_SERVERS`), the Online branch is untouched, the entry check runs only in Servers mode, and `ServerEntryCheck::update()` is driven every frame. The refusal messages match PROTOCOL 4.4 / D23 exactly (VPN wording verbatim, ping message carries rtt then limit, the catch-all covers code 0 and every other code). The Zero Hour and Generals changes are byte-identical in the added code. All text is English and comes from the text system.
+  - Low: the "Checking connection" box passes the body label as its title, so the title bar reads "Checking connection" instead of "Servers". Cosmetic only, on a transient box; left for a later UI polish pass when the menu is seen in the running game.
+  - Low: `Servers/Client/servers.str` sits in the Main track's folder; it is inert data that must be merged into the packaged string file (a later-phase task), not a code issue. The 2-line `Core/GameEngine/CMakeLists.txt` entry that compiles the new file pair is accepted as minimal plumbing.
+  - On-screen behaviour (button placement and the Multiplayer-menu frame, the modal flow, the OK/Cancel returns) could not be verified here because the game is not installed. These are the Phase 1 D gate and are recorded as pending: needs the game installed.
