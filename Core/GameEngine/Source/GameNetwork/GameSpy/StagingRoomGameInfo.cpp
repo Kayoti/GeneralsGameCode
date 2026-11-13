@@ -47,6 +47,9 @@
 #include "GameNetwork/GameSpyOverlay.h"
 #include "GameNetwork/NAT.h"
 #include "GameNetwork/NetworkInterface.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/GameSpy/ServersMode.h"
+#endif
 
 
 // GameSpyGameSlot -------------------------------------------
@@ -570,6 +573,14 @@ void GameSpyStagingRoom::startGame(Int gameID)
 			}
 		}
 	}
+
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 In Servers mode the match connects through the relay, not NAT.
+	// The relay handshake is driven from the staging menu; this only fills in the per-player info above and
+	// leaves TheNAT null, so no player-to-player paths are negotiated.
+	if (ServersModeIsOn())
+		return;
+#endif
 
 //#if defined(RTS_DEBUG)
 	if (numHumans < 2)

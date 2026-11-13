@@ -24,3 +24,15 @@ END
 GUI:ServersCannotConnect
 "The server cannot be reached."
 END
+
+GUI:ServersContacting
+"Contacting server"
+END
+
+GUI:ServersCouldNotJoin
+"Could not join the match."
+END
+
+GUI:ServersStartRosterChanged
+"A player joined or left. Press Start again."
+END
