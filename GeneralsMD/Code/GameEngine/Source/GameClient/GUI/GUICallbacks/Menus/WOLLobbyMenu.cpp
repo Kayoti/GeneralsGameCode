@@ -224,6 +224,51 @@ void SetLobbyAttemptHostJoin(Bool start)
 	s_tryingToHostOrJoin = start;
 }
 
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 13/11/2026 Runs the entry check again when the player attempts to join a lobby, and acts on its result.
+static Bool s_serversJoinPassed = FALSE;
+
+static void serversLeaveLobby()
+{
+	TheGameSpyInfo->leaveGroupRoom();
+	ServersLogoutOnline();
+	SetLobbyAttemptHostJoin( TRUE ); // pretend, since we don't want to queue up another action
+	buttonPushed = true;
+	nextScreen = nullptr;
+	TheShell->pop();
+}
+
+static void updateServersGate()
+{
+	// Results are taken only while the screen is idle. The lobby also drops the result of an action that is not its own,
+	// such as an Accept whose staging room was closed meanwhile, so that no check box is left on screen.
+	UnsignedInt handled = 0;
+	if( TheShell->isAnimFinished() && TheTransitionHandler->isFinished() && !buttonPushed )
+		handled = SERVERS_GATE_JOIN | SERVERS_GATE_ACCEPT | SERVERS_GATE_EXIT;
+
+	ServersGate action;
+	switch( ServersGateUpdate( handled, &action ) )
+	{
+		case SERVERS_GATE_PASSED:
+			if( action == SERVERS_GATE_JOIN && parent && buttonJoin && buttonJoin->winGetEnabled() )
+			{
+				// Press Join again: the handler lets it through once, because the check has passed
+				s_serversJoinPassed = TRUE;
+				TheWindowManager->winSendSystemMsg( parent, GBM_SELECTED, (WindowMsgData)buttonJoin, buttonJoinID );
+				s_serversJoinPassed = FALSE;
+			}
+			break;
+
+		case SERVERS_GATE_REFUSED:
+			serversLeaveLobby();
+			break;
+
+		default:
+			break;
+	}
+}
+#endif
+
 // Tooltips -------------------------------------------------------------------------------
 
 static void playerTooltip(GameWindow *window,
@@ -733,6 +778,10 @@ void WOLLobbyMenuInit( WindowLayout *layout, void *userData )
 //-------------------------------------------------------------------------------------------------
 static void shutdownComplete( WindowLayout *layout )
 {
+#ifdef RTS_SERVERS
+	// TheSuperHackers @fix Kayoti 13/11/2026 A refused entry check tears the online session down here, after the shutdown has used it and before the main menu is initialised.
+	ServersTearDownOnline();
+#endif
 
 	isShuttingDown = false;
 
@@ -907,6 +956,10 @@ void refreshPlayerList( Bool forceRefresh )
 //-------------------------------------------------------------------------------------------------
 void WOLLobbyMenuUpdate( WindowLayout * layout, void *userData)
 {
+#ifdef RTS_SERVERS
+	if (ServersModeIsOn())
+		updateServersGate();
+#endif
 		if(justEntered)
 	{
 		if(initialGadgetDelay == 1)
@@ -1557,6 +1610,15 @@ WindowMsgHandledType WOLLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 					if (s_tryingToHostOrJoin)
 						break;
 
+#ifdef RTS_SERVERS
+					// TheSuperHackers @feature Kayoti 13/11/2026 In Servers mode the join waits for the entry check.
+					if (ServersModeIsOn() && !s_serversJoinPassed)
+					{
+						if (!ServersGateIsPending() && !ServersGateStart(SERVERS_GATE_JOIN))
+							serversLeaveLobby();
+						break;
+					}
+#endif
 					TheLobbyQueuedUTMs.clear();
 					// Look for a game to join
 					groupRoomToJoin = TheGameSpyInfo->getCurrentGroupRoom();

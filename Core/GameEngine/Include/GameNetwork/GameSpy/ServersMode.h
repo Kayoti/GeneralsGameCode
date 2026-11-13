@@ -79,4 +79,53 @@ ServersEntryResult ServersEntryUpdate();
 /// Drops a check in progress and closes the "Checking connection" box.
 void ServersEntryCancel();
 
+// Entry check on player actions ---------------------------------------------------------------------
+// While Servers mode is on, the check is repeated against the player's own region when the player
+// attempts to join a lobby, presses Accept in a lobby, or exits a lobby (PROTOCOL.md 4.4, DECISIONS D22).
+// It is separate from the check above, which the main menu drives. Each screen that can start an action
+// calls ServersGateUpdate() every frame for the actions it handles.
+
+enum ServersGate
+{
+	SERVERS_GATE_NONE = 0,
+	SERVERS_GATE_JOIN = 1,		///< Attempting to join a lobby
+	SERVERS_GATE_ACCEPT = 2,	///< Pressing Accept in a lobby
+	SERVERS_GATE_EXIT = 4,		///< Exiting a lobby. Started after the player has left.
+};
+
+enum ServersGateResult
+{
+	SERVERS_GATE_IDLE,				///< No check, or the finished check belongs to an action the caller does not handle
+	SERVERS_GATE_CHECKING,		///< Running
+	SERVERS_GATE_PASSED,			///< Returned once: the stored pass is replaced
+	SERVERS_GATE_REFUSED,			///< Returned once: the refusal message is already shown. The caller leaves the online lobby.
+	SERVERS_GATE_CANCELLED,		///< Returned once: the player cancelled, or the check was dropped. The action is not done.
+};
+
+/**
+ * Starts the check for an action, against the region of the current pass, and shows the "Checking connection" box.
+ * Only valid while Servers mode is on. Drops any earlier check. Returns FALSE when the check could not start.
+ * The refusal message is then already shown, and the caller treats it as a refusal.
+ */
+Bool ServersGateStart( ServersGate action );
+
+/// True from ServersGateStart() until ServersGateUpdate() has returned the result. Used to stop an action being triggered twice.
+Bool ServersGateIsPending();
+
+/**
+ * Call once per frame, also while a screen is shutting down. Does not block. handled is the set of ServersGate values
+ * the caller can act on: the result of any other action is held until a caller that handles it asks.
+ * action is set to the action the result belongs to.
+ */
+ServersGateResult ServersGateUpdate( UnsignedInt handled, ServersGate *action );
+
+/**
+ * Closes the overlays and asks the online services to log out. The caller then pops its screen back to the main menu,
+ * and calls ServersTearDownOnline() from the screen's shutdownComplete, once the screen no longer uses the online session.
+ */
+void ServersLogoutOnline();
+
+/// Tears the online session down if ServersLogoutOnline() asked for it, as the Welcome screen's Back does. Does nothing otherwise.
+void ServersTearDownOnline();
+
 #endif // RTS_SERVERS

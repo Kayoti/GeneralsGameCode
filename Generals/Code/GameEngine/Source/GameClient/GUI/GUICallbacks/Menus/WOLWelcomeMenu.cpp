@@ -64,6 +64,9 @@
 #include "GameNetwork/GameSpy/PersistentStorageThread.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"
 #include "GameNetwork/GameSpy/MainMenuUtils.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/GameSpy/ServersMode.h"
+#endif
 #include "GameNetwork/WOLBrowser/WebBrowser.h"
 
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
@@ -486,6 +489,17 @@ void WOLWelcomeMenuInit( WindowLayout *layout, void *userData )
 	buttonLadderID = TheNameKeyGenerator->nameToKey( "WOLWelcomeMenu.wnd:ButtonLadder" );
 	buttonLadder = TheWindowManager->winGetWindowFromId( parentWOLWelcome, buttonLadderID );
 
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 Quick Match and the ladder screen are not available in Servers mode.
+	if (ServersModeIsOn())
+	{
+		if (buttonQuickMatch)
+			buttonQuickMatch->winHide(TRUE);
+		if (buttonLadder)
+			buttonLadder->winHide(TRUE);
+	}
+#endif
+
 	if (TheFirewallHelper == nullptr) {
 		TheFirewallHelper = createFirewallHelper();
 	}
@@ -761,6 +775,12 @@ WindowMsgHandledType WOLWelcomeMenuSystem( GameWindow *window, UnsignedInt msg,
 
 				GameWindow *control = (GameWindow *)mData1;
 				Int controlID = control->winGetWindowId();
+
+#ifdef RTS_SERVERS
+				// TheSuperHackers @feature Kayoti 13/11/2026 The buttons are hidden in Servers mode, and a press that still arrives is ignored.
+				if (ServersModeIsOn() && (controlID == buttonQuickMatchID || controlID == buttonLadderID))
+					break;
+#endif
 
 				if ( controlID == buttonBackID )
 				{
