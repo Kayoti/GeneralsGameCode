@@ -31,6 +31,7 @@
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/MessageBox.h"
 #include "GameNetwork/GameSpy/BuddyThread.h"
+#include "GameNetwork/GameSpy/PeerDefs.h"
 #include "GameNetwork/GameSpy/PeerThread.h"
 #include "GameNetwork/GameSpy/ServersMode.h"
 #include "GameNetwork/GameSpyOverlay.h"
@@ -43,6 +44,7 @@ static ServerEntryCheck *s_gateCheck = nullptr;
 static GameWindow *s_gateWindow = nullptr;
 static ServersGate s_gateAction = SERVERS_GATE_NONE;
 static Bool s_gateCancelled = FALSE;
+static Bool s_tearDownPending = FALSE;	// ServersLogoutOnline() has been called and the session is not yet torn down
 
 static void closeGateWindow()
 {
@@ -100,6 +102,7 @@ void ServersModeSet( const ServerRegion &region, const ServerPass &pass )
 void ServersModeClear()
 {
 	releaseGate();
+	s_tearDownPending = FALSE;
 	s_state.on = FALSE;
 	memset( &s_state.region, 0, sizeof( s_state.region ) );
 	s_state.pass = ServerPass();
@@ -362,6 +365,7 @@ ServersGateResult ServersGateUpdate( UnsignedInt handled, ServersGate *action )
 void ServersLogoutOnline()
 {
 	GameSpyCloseAllOverlays();
+	s_tearDownPending = TRUE;
 
 	if( TheGameSpyPeerMessageQueue )
 	{
@@ -375,6 +379,15 @@ void ServersLogoutOnline()
 		breq.buddyRequestType = BuddyRequest::BUDDYREQUEST_LOGOUT;
 		TheGameSpyBuddyMessageQueue->addRequest( breq );
 	}
+}
+
+void ServersTearDownOnline()
+{
+	if( !s_tearDownPending )
+		return;
+
+	s_tearDownPending = FALSE;
+	TearDownGameSpy();
 }
 
 #endif // RTS_SERVERS

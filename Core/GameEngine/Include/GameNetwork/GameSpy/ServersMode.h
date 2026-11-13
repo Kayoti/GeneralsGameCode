@@ -119,7 +119,13 @@ Bool ServersGateIsPending();
  */
 ServersGateResult ServersGateUpdate( UnsignedInt handled, ServersGate *action );
 
-/// Closes the overlays and asks the online services to log out. The caller then pops its screen back to the main menu.
+/**
+ * Closes the overlays and asks the online services to log out. The caller then pops its screen back to the main menu,
+ * and calls ServersTearDownOnline() from the screen's shutdownComplete, once the screen no longer uses the online session.
+ */
 void ServersLogoutOnline();
+
+/// Tears the online session down if ServersLogoutOnline() asked for it, as the Welcome screen's Back does. Does nothing otherwise.
+void ServersTearDownOnline();
 
 #endif // RTS_SERVERS

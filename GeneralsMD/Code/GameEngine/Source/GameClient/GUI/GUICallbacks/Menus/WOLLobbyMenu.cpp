@@ -778,6 +778,10 @@ void WOLLobbyMenuInit( WindowLayout *layout, void *userData )
 //-------------------------------------------------------------------------------------------------
 static void shutdownComplete( WindowLayout *layout )
 {
+#ifdef RTS_SERVERS
+	// TheSuperHackers @fix Kayoti 13/11/2026 A refused entry check tears the online session down here, after the shutdown has used it and before the main menu is initialised.
+	ServersTearDownOnline();
+#endif
 
 	isShuttingDown = false;
 
@@ -953,7 +957,8 @@ void refreshPlayerList( Bool forceRefresh )
 void WOLLobbyMenuUpdate( WindowLayout * layout, void *userData)
 {
 #ifdef RTS_SERVERS
-	updateServersGate();
+	if (ServersModeIsOn())
+		updateServersGate();
 #endif
 		if(justEntered)
 	{
