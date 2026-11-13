@@ -42,6 +42,21 @@ unset(CMAKE_POLICY_VERSION_MINIMUM)
 # ENet's own CMake file does not export its public headers to consumers.
 target_include_directories(enet PUBLIC ${enet_SOURCE_DIR}/include)
 
+# libmaxminddb 1.14.1, for the VPN check's address-to-operator lookups (PROTOCOL.md 8). Only the static library is
+# built. Its tests, command-line tools and install rules are left out.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+set(BUILD_SHARED_LIBS OFF)
+set(BUILD_TESTING OFF)
+set(MAXMINDDB_BUILD_BINARIES OFF)
+set(MAXMINDDB_INSTALL OFF)
+FetchContent_Declare(
+    maxminddb
+    GIT_REPOSITORY https://github.com/maxmind/libmaxminddb.git
+    GIT_TAG        4a3d17a621c0ebcb81498fd34d313f67fd940ab5 # 1.14.1
+)
+FetchContent_MakeAvailable(maxminddb)
+unset(CMAKE_POLICY_VERSION_MINIMUM)
+
 # libsodium 1.0.22. The release has no CMake build, so the prebuilt MSVC static library from the
 # official release is used. The archive is checked against the SHA-256 digest published on the release.
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -97,11 +112,13 @@ add_library(relay_core STATIC
     src/sessions.cpp
     src/sessions.h
     src/text.h
+    src/vpn_check.cpp
+    src/vpn_check.h
     src/wire.h
 )
 
 target_include_directories(relay_core PUBLIC src)
-target_link_libraries(relay_core PUBLIC enet libsodium)
+target_link_libraries(relay_core PUBLIC enet libsodium maxminddb)
 target_compile_definitions(relay_core PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(relay_core PRIVATE /W4 /WX)
 

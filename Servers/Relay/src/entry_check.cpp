@@ -77,11 +77,6 @@ EntryVerdict PingRound::Verdict(std::uint16_t limit_ms, std::uint16_t &median_ms
   return median_ms > limit_ms ? EntryVerdict::PING_TOO_HIGH : EntryVerdict::PASS;
 }
 
-bool VpnCheckPasses(std::uint32_t address) {
-  static_cast<void>(address);
-  return true;
-}
-
 std::uint64_t RandomId() {
   std::uint64_t value = 0;
   randombytes_buf(&value, sizeof(value));

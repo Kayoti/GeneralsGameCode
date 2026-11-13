@@ -1,4 +1,4 @@
-// Entry check: ping measurement, verdict, pass issue, rate limit and the VPN hook (PROTOCOL.md 4.4 and 6).
+// Entry check: ping measurement, verdict, pass issue and rate limit (PROTOCOL.md 4.4 and 6).
 // Nothing here uses the network. host.cpp sends the messages and feeds in the times.
 #pragma once
 
@@ -70,10 +70,6 @@ private:
   std::size_t m_sent = 0;
   std::uint32_t m_start_ms = 0;
 };
-
-// Hook for the VPN check (package A3). Returns false when the address is flagged. Until A3 is built, every address
-// passes.
-bool VpnCheckPasses(std::uint32_t address);
 
 // Random 64-bit value from the system's secure random source. Used for PING nonces and pass ids.
 std::uint64_t RandomId();
