@@ -68,7 +68,7 @@ Forwarding records (A5). Removing players during a match (A6).
   - Failed-join counting covers refusals after the session is found and the pass accepted (`BAD_REQUEST` slot, `NOT_EXPECTED`, `SLOT_TAKEN`, `BAD_TOKEN`, `BUILD_MISMATCH`). Pass failures and `NO_SESSION` do not count, since they are not tied to the session.
   - PROTOCOL.md section 10 assumptions V1 to V8 are not touched by this package.
 - Verification:
-  - Relay built with `cmake -S Servers/Relay -B C:c-buildA4 -G Ninja -DCMAKE_BUILD_TYPE=Release -DRELAY_BUILD_TESTS=ON` in the VS x86 environment, warnings as errors on relay code, build exit 0. `ctest` passed (`relay_tests`).
+  - Relay built with `cmake -S Servers/Relay -B <build dir> -G Ninja -DCMAKE_BUILD_TYPE=Release -DRELAY_BUILD_TESTS=ON` in the VS x86 environment, warnings as errors on relay code, build exit 0. `ctest` passed (`relay_tests`).
   - Live run on one PC (relay with `--no-address-check`, port 17777): create plus two joins gave `WELCOME`, `ROSTER`, `ROSTER`, `START` in order on all three; 4 expected with 2 connected gave `ROSTER`, `DROP` slot 1, `DROP` slot 3 (`NEVER_JOINED`, `last_frame` 29), `START` after 30 s; host alone gave `REFUSE` 17 after 30 s; a second `CREATE` with the same pass id gave `REFUSE` 9; the `idle` mode with 6 connections kept 4 and the relay logged the refusals.
   - `clang-format --dry-run --Werror` and `clang-tidy` 22.1.3 with the root `.clang-tidy` on `sessions.cpp`, `rate_limit.cpp`, `host.cpp`, `pass.cpp`, `main.cpp`, `tools/session_client.cpp`, `tests/relay_tests.cpp`: 0 warnings.
   - Not run: more than 1 address in a live test (all clients were 127.0.0.1), the 256 total limit, and the address check switched on.
