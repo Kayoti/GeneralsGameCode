@@ -72,13 +72,14 @@ void SendMessage(ENetPeer *peer, const unsigned char *data, std::size_t length) 
 
 // Settings of the session manager. It checks passes with the public half of the region key held in settings.
 SessionSettings MakeSessionSettings(const EntryCheckSettings &settings, bool check_address, std::size_t max_sessions,
-                                    const RecordSettings &records) {
+                                    const RecordSettings &records, const DropSettings &drop) {
   SessionSettings session_settings;
   session_settings.public_key = settings.key.public_key;
   session_settings.region = settings.region;
   session_settings.check_address = check_address;
   session_settings.max_sessions = max_sessions;
   session_settings.records = records;
+  session_settings.drop = drop;
   return session_settings;
 }
 
@@ -95,13 +96,15 @@ struct RelayHost::Connection {
   std::uint32_t m_exe_crc = 0;
   std::uint32_t m_ini_crc = 0;
   PingRound m_round;
+  std::uint32_t m_last_heard_ms = 0; // When ENet last received anything from the peer, seen at the last service pass.
 };
 
 RelayHost::RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings, bool check_address,
-                     std::size_t max_sessions, const RecordSettings &records)
+                     std::size_t max_sessions, const RecordSettings &records, const DropSettings &drop)
     : listen_port_(listen_port), next_connection_id_(1), host_(nullptr), settings_(settings),
       rate_limiter_(ENTRY_CHECKS_PER_WINDOW, RATE_WINDOW_MS), session_limit_(max_sessions),
-      sessions_(MakeSessionSettings(settings_, check_address, max_sessions, records), *this) {}
+      connection_timeout_ms_(drop.m_connection_timeout_ms),
+      sessions_(MakeSessionSettings(settings_, check_address, max_sessions, records, drop), *this) {}
 
 RelayHost::~RelayHost() {
   if (host_ == nullptr) {
@@ -151,6 +154,7 @@ bool RelayHost::Run() {
       LogError("relay: network error while servicing the UDP port");
       return false;
     }
+    NoteReceiveTimes();
     CheckFirstMessageDeadlines();
     ServiceEntryChecks();
     sessions_.Tick(enet_time_get());
@@ -204,6 +208,10 @@ void RelayHost::OnConnect(ENetPeer *peer) {
   connection->m_first_message_seen = false;
   connection->m_closing = false;
   connection->m_entry_state = EntryState::NONE;
+  connection->m_last_heard_ms = enet_time_get();
+  // The configured time is how long ENet waits for an answer before it reports the connection lost. The minimum
+  // is set to the same value so that this is the only time that applies. The limit keeps ENet's default.
+  enet_peer_timeout(peer, 0, connection_timeout_ms_, connection_timeout_ms_);
   peer->data = connection;
   peers_by_connection_[connection->m_id] = peer;
   LogLine("connection %u opened", connection->m_id);
@@ -214,8 +222,9 @@ void RelayHost::OnDisconnect(ENetPeer *peer) {
   if (connection == nullptr) {
     return;
   }
-  LogLine("connection %u closed", connection->m_id);
-  sessions_.OnClosed(connection->m_id);
+  const bool LOST = ConnectionWasLost(*connection);
+  LogLine("connection %u closed%s", connection->m_id, LOST ? " (connection lost)" : "");
+  sessions_.OnClosed(connection->m_id, LOST);
   peers_by_connection_.erase(connection->m_id);
   delete connection;
   peer->data = nullptr;
@@ -296,6 +305,23 @@ void RelayHost::OnReceive(ENetPeer *peer, std::uint8_t channel_id, const unsigne
   }
   LogLine("connection %u: message type %u dropped, no handler in this build", connection->m_id,
           static_cast<unsigned int>(data[0]));
+}
+
+// ENet reports a lost connection and a normal disconnect with the same event, so the two are told apart by how long
+// the peer was silent. A peer that closes normally was heard from a moment ago. A peer that is lost has been silent
+// for about the configured timeout, so half of it is the dividing line.
+void RelayHost::NoteReceiveTimes() {
+  for (std::size_t i = 0; i < host_->peerCount; ++i) {
+    const ENetPeer *peer = &host_->peers[i];
+    Connection *connection = static_cast<Connection *>(peer->data);
+    if (connection != nullptr && peer->state == ENET_PEER_STATE_CONNECTED) {
+      connection->m_last_heard_ms = peer->lastReceiveTime;
+    }
+  }
+}
+
+bool RelayHost::ConnectionWasLost(const Connection &connection) const {
+  return enet_time_get() - connection.m_last_heard_ms >= connection_timeout_ms_ / 2;
 }
 
 void RelayHost::CheckFirstMessageDeadlines() {

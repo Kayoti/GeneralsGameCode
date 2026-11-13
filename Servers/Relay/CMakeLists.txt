@@ -78,6 +78,7 @@ set_target_properties(libsodium PROPERTIES
 add_library(relay_core STATIC
     src/config.cpp
     src/config.h
+    src/drop.cpp
     src/entry_check.cpp
     src/entry_check.h
     src/host.cpp

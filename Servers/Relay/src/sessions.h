@@ -28,12 +28,20 @@ public:
   virtual void Close(std::uint32_t connection) = 0;
 };
 
+// Times for removing players from a running match (PROTOCOL.md 4.7 and 6), in milliseconds.
+struct DropSettings {
+  std::uint32_t m_loading_ms = LOADING_TIMEOUT_MS;
+  std::uint32_t m_stall_ms = STALL_TIMEOUT_MS;
+  std::uint32_t m_connection_timeout_ms = CONNECTION_TIMEOUT_MS; // Used by the host for ENet's timeout.
+};
+
 struct SessionSettings {
   const unsigned char *public_key = nullptr; // Region public key used to check passes.
   std::uint16_t region = 0;
   bool check_address = true; // False only with the relay's test start option.
   std::size_t max_sessions = 200;
   RecordSettings records;
+  DropSettings drop;
 };
 
 // What the host knows about one received first message.
@@ -60,13 +68,15 @@ public:
   // (PROTOCOL.md 4.6). Valid records are forwarded unchanged. Does nothing for a connection that holds no slot.
   void OnData(std::uint32_t connection, std::uint32_t now_ms, const unsigned char *body, std::size_t length);
 
-  // LEAVE from a bound connection. Has the effect of closing the connection.
+  // LEAVE from a bound connection. Has the effect of closing the connection. In a running match, a player whose
+  // leave has not been forwarded through its leave frame is dropped with LEFT (PROTOCOL.md 4.7).
   void OnLeave(std::uint32_t connection);
 
-  // The connection ended for any reason. Unknown connections are ignored.
-  void OnClosed(std::uint32_t connection);
+  // The connection ended for any reason. Unknown connections are ignored. connection_lost is true when ENet
+  // reported the connection lost, which gives the drop reason TIMEOUT instead of LEFT.
+  void OnClosed(std::uint32_t connection, bool connection_lost = false);
 
-  // Checks the 30 second start timers.
+  // Checks the start timers, the loading time and the stall rule.
   void Tick(std::uint32_t now_ms);
 
   // True while the connection holds a slot in a session.
@@ -87,6 +97,12 @@ private:
     std::uint32_t m_created_ms = 0;
     std::size_t m_failed_joins = 0;
     bool m_started = false;
+    std::uint32_t m_started_ms = 0;
+    std::uint8_t m_loaded_mask = 0;                // Slots that sent LOADCOMPLETE.
+    bool m_frame_info_forwarded = false;           // A FRAMEINFO has been forwarded in this session.
+    std::uint32_t m_advance_ms[SLOT_COUNT] = {};   // When each slot's next_frame last increased.
+    std::uint8_t m_leave_mask = 0;                 // Slots whose PLAYERLEAVE was forwarded.
+    std::uint32_t m_leave_frames[SLOT_COUNT] = {}; // The leave frame of those slots.
     MatchRecords m_records;
   };
 
@@ -110,8 +126,8 @@ private:
   void SendWelcome(std::uint64_t session_id, const Session &session, std::uint8_t slot);
   void SendToConnected(const Session &session, const unsigned char *message, std::size_t length);
   void SendRoster(const Session &session);
-  void SendStart(Session &session);
-  void ExpireSession(std::uint64_t session_id, Session &session);
+  void SendStart(Session &session, std::uint32_t now_ms);
+  void ExpireSession(std::uint64_t session_id, Session &session, std::uint32_t now_ms);
   void RemoveSession(std::uint64_t session_id);
 
   // Match records (match_data.cpp).
@@ -124,6 +140,18 @@ private:
   void FlushForwarded(const Session &session);
   void FlushDestination(const Session &session, std::size_t slot);
   void DropConnection(std::uint32_t connection, DropReason reason);
+  void NoteAccepted(Session &session, std::uint8_t slot, std::uint32_t now_ms, const RecordHeader &header);
+
+  // Removing players (drop.cpp).
+  struct PendingDrop {
+    std::uint32_t m_connection = 0;
+    DropReason m_reason = DROP_TIMEOUT;
+  };
+  bool LeaveCompleted(const Session &session, std::uint8_t slot) const;
+  bool DropIfMatchActive(std::uint32_t connection, DropReason reason);
+  void CollectTimeouts(std::uint32_t now_ms, std::vector<PendingDrop> &due) const;
+  void CollectSessionTimeouts(const Session &session, std::uint32_t now_ms, std::vector<PendingDrop> &due) const;
+  bool IsStalled(const Session &session, std::uint8_t slot, std::uint32_t now_ms) const;
   void LogCounters(const Session &session) const;
 
   SessionSettings settings_;

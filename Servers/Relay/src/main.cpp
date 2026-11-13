@@ -115,10 +115,15 @@ int RunRelay(int argc, char **argv) {
   entry_settings.ping_limit_ms = config.ping_limit_ms;
   entry_settings.key = region_key;
 
+  relay::DropSettings drop_settings;
+  drop_settings.m_loading_ms = static_cast<std::uint32_t>(config.loading_time_s) * 1000;
+  drop_settings.m_stall_ms = static_cast<std::uint32_t>(config.stall_time_s) * 1000;
+  drop_settings.m_connection_timeout_ms = static_cast<std::uint32_t>(config.connection_timeout_s) * 1000;
+
   int exit_code = 0;
   {
     relay::RelayHost host(config.listen_port, entry_settings, options.m_check_address, config.max_sessions,
-                          options.m_records);
+                          options.m_records, drop_settings);
     if (!host.Start(error)) {
       relay::LogError("relay: %s", error.c_str());
       exit_code = 1;

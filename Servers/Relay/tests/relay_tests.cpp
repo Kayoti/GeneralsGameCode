@@ -816,8 +816,10 @@ void TestLeaderAndLeaving(const relay::RegionKey &key) {
   manager.OnLeave(3);
   EXPECT_TRUE(fixture.m_output.WasClosed(3));
   host = fixture.m_output.For(1);
-  EXPECT_EQ(host.size(), 1u);
-  EXPECT_TRUE(IsMessage(host.at(0), relay::MSG_ROSTER, 0x28, 3));
+  EXPECT_EQ(host.size(), 2u); // The match is running, so a leave without a leave frame is a DROP first.
+  EXPECT_EQ(host.at(0).at(0), relay::MSG_DROP);
+  EXPECT_EQ(host.at(0).at(2), relay::DROP_LEFT);
+  EXPECT_TRUE(IsMessage(host.at(1), relay::MSG_ROSTER, 0x28, 3));
 
   // Everyone gone: the session and its bindings are released.
   manager.OnClosed(1);
@@ -1652,6 +1654,280 @@ void TestMatchRecords(const relay::RegionKey &key) {
   TestDataRateLimits(key);
 }
 
+// ---- Removing players (PROTOCOL.md 4.7) ----
+
+const std::uint32_t SECOND_MS = 1000;
+
+void LoadAll(MatchFixture &match) {
+  for (unsigned slot = 0; slot < 3; ++slot) {
+    match.Send(slot, {Simple(relay::COMMAND_LOADCOMPLETE, slot)});
+  }
+}
+
+bool IsDrop(const std::vector<unsigned char> &message, unsigned slot, unsigned reason, std::uint32_t last_frame) {
+  return message.size() == 1 + relay::DROP_BODY_SIZE && message.at(0) == relay::MSG_DROP && message.at(1) == slot &&
+         message.at(2) == reason && relay::GetU32(message.data() + 3) == last_frame;
+}
+
+// Expects exactly DROP and ROSTER for the slot at the observer connection, and the slot's connection closed.
+void ExpectDropped(const MatchFixture &match, std::uint32_t observer, unsigned slot, unsigned reason,
+                   std::uint32_t last_frame, unsigned mask_after, unsigned leader_after) {
+  std::vector<std::vector<unsigned char>> messages = ControlMessages(match.m_fixture.m_output, observer);
+  EXPECT_EQ(messages.size(), 2u);
+  if (messages.size() == 2) {
+    EXPECT_TRUE(IsDrop(messages.at(0), slot, reason, last_frame));
+    EXPECT_TRUE(IsMessage(messages.at(1), relay::MSG_ROSTER, mask_after, leader_after));
+  }
+  EXPECT_TRUE(match.m_fixture.m_output.WasClosed(slot + 1));
+}
+
+void TestLoadingTimeout(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  const std::uint32_t STARTED = match.m_fixture.m_now_ms;
+  match.Send(0, {Simple(relay::COMMAND_LOADCOMPLETE, 0)});
+  match.Send(1, {Simple(relay::COMMAND_LOADCOMPLETE, 1)});
+  match.m_fixture.m_output.Clear();
+
+  match.m_manager.Tick(STARTED + relay::LOADING_TIMEOUT_MS - 1);
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+  match.m_manager.Tick(STARTED + relay::LOADING_TIMEOUT_MS);
+  ExpectDropped(match, 1, 2, relay::DROP_TIMEOUT, relay::NEVER_JOINED_LAST_FRAME, 0x03, 0);
+  EXPECT_TRUE(!match.m_manager.IsBound(3));
+
+  // The other two are not touched.
+  EXPECT_TRUE(match.m_manager.IsBound(1) && match.m_manager.IsBound(2));
+  match.m_fixture.m_output.Clear();
+  match.m_manager.Tick(STARTED + (2 * relay::LOADING_TIMEOUT_MS));
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+}
+
+void TestLoadingTimeIsConfigurable(const relay::RegionKey &key) {
+  SessionFixture fixture(key);
+  fixture.m_settings.drop.m_loading_ms = 5 * SECOND_MS;
+  relay::SessionManager manager(fixture.m_settings, fixture.m_output);
+  Created created;
+  EXPECT_TRUE(MakeSession(fixture, manager, 0x03, 0, created, 1));
+  Join(fixture, manager, 2, created, 1, created.m_tokens[1]);
+  fixture.m_output.Clear();
+  manager.Tick(fixture.m_now_ms + (5 * SECOND_MS) - 1);
+  EXPECT_EQ(fixture.m_output.m_sent.size(), 0u);
+  manager.Tick(fixture.m_now_ms + (5 * SECOND_MS));
+  EXPECT_TRUE(fixture.m_output.WasClosed(1) || fixture.m_output.WasClosed(2));
+}
+
+void TestLoadingTimerNeedsStart(const relay::RegionKey &key) {
+  // Before START the 30 second rule applies, not the loading time.
+  MatchFixture match(key);
+  match.m_fixture.m_output.Clear();
+  match.m_manager.Tick(match.m_fixture.m_now_ms + relay::SESSION_START_WAIT_MS - 1);
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+}
+
+void TestStallNeedsFrameInfo(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  LoadAll(match);
+  match.m_fixture.m_output.Clear();
+  // Everyone has loaded and nobody has sent a FRAMEINFO. No amount of waiting is a stall.
+  match.m_manager.Tick(match.m_fixture.m_now_ms + (3600 * SECOND_MS));
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+}
+
+void TestStallDropsLowestSlot(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  LoadAll(match);
+  match.Send(0, {FrameInfo(0, 30, 0)});
+  match.Send(1, {FrameInfo(1, 30, 0)});
+  const std::uint32_t FIRST = match.m_fixture.m_now_ms;
+  match.m_fixture.m_output.Clear();
+
+  // Slots 0 and 1 are level, so neither is lower than the other. Slot 2 is lowest and has been idle.
+  match.m_manager.Tick(FIRST + relay::STALL_TIMEOUT_MS - 1);
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+  match.m_manager.Tick(FIRST + relay::STALL_TIMEOUT_MS);
+  ExpectDropped(match, 1, 2, relay::DROP_TIMEOUT, 29, 0x03, 0);
+  EXPECT_TRUE(!match.m_fixture.m_output.WasClosed(1) && !match.m_fixture.m_output.WasClosed(2));
+}
+
+void TestStallClockRestartsOnProgress(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  LoadAll(match);
+  match.Send(0, {FrameInfo(0, 30, 0), FrameInfo(0, 31, 0)});
+  match.Send(1, {FrameInfo(1, 30, 0), FrameInfo(1, 31, 0)});
+  const std::uint32_t FIRST = match.m_fixture.m_now_ms;
+  match.Send(2, {FrameInfo(2, 30, 0)}, 15 * SECOND_MS); // Slot 2 is at 31, the others at 32.
+  match.m_fixture.m_output.Clear();
+
+  match.m_manager.Tick(FIRST + (20 * SECOND_MS));
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+  match.m_manager.Tick(FIRST + (35 * SECOND_MS) - 1);
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+  match.m_manager.Tick(FIRST + (35 * SECOND_MS));
+  ExpectDropped(match, 1, 2, relay::DROP_TIMEOUT, 30, 0x03, 0); // next_frame 31, so last_frame 30.
+
+  // Everyone level: nobody is lower than every other slot, so nobody is dropped.
+  MatchFixture level(key);
+  level.Start();
+  LoadAll(level);
+  level.Send(0, {FrameInfo(0, 30, 0)});
+  level.Send(1, {FrameInfo(1, 30, 0)});
+  level.Send(2, {FrameInfo(2, 30, 0)});
+  level.m_fixture.m_output.Clear();
+  level.m_manager.Tick(level.m_fixture.m_now_ms + (60 * SECOND_MS));
+  EXPECT_EQ(level.m_fixture.m_output.m_sent.size(), 0u);
+}
+
+void TestStallTimeIsConfigurable(const relay::RegionKey &key) {
+  SessionFixture fixture(key);
+  fixture.m_settings.drop.m_stall_ms = 3 * SECOND_MS;
+  relay::SessionManager manager(fixture.m_settings, fixture.m_output);
+  Created created;
+  EXPECT_TRUE(MakeSession(fixture, manager, 0x03, 0, created, 1));
+  Join(fixture, manager, 2, created, 1, created.m_tokens[1]);
+  std::vector<unsigned char> first = DataBody({Simple(relay::COMMAND_LOADCOMPLETE, 0), FrameInfo(0, 30, 0)});
+  std::vector<unsigned char> second = DataBody({Simple(relay::COMMAND_LOADCOMPLETE, 1)});
+  manager.OnData(1, fixture.m_now_ms, first.data(), first.size());
+  manager.OnData(2, fixture.m_now_ms, second.data(), second.size());
+  fixture.m_output.Clear();
+  manager.Tick(fixture.m_now_ms + (3 * SECOND_MS) - 1);
+  EXPECT_EQ(fixture.m_output.m_sent.size(), 0u);
+  manager.Tick(fixture.m_now_ms + (3 * SECOND_MS));
+  EXPECT_TRUE(fixture.m_output.WasClosed(2));
+  EXPECT_TRUE(!fixture.m_output.WasClosed(1));
+}
+
+void TestLeaveWithoutLeaveFrameIsDrop(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  LoadAll(match);
+  match.Send(1, {FrameInfo(1, 30, 0), FrameInfo(1, 31, 0)});
+  match.m_fixture.m_output.Clear();
+  match.m_manager.OnLeave(2);
+  ExpectDropped(match, 1, 1, relay::DROP_LEFT, 31, 0x05, 0);
+  EXPECT_EQ(ControlMessages(match.m_fixture.m_output, 3).size(), 2u);
+  EXPECT_TRUE(!match.m_manager.IsBound(2));
+
+  // PLAYERLEAVE forwarded, but not every FRAMEINFO through the leave frame: still a drop.
+  MatchFixture early(key);
+  early.Start();
+  LoadAll(early);
+  early.Send(1, {PlayerLeave(1, 31, 1), FrameInfo(1, 30, 1)});
+  early.m_fixture.m_output.Clear();
+  early.m_manager.OnLeave(2);
+  ExpectDropped(early, 1, 1, relay::DROP_LEFT, 30, 0x05, 0);
+}
+
+void TestDisconnectReasons(const relay::RegionKey &key) {
+  // Connection ended before the leave frame: LEFT. ENet reports it lost: TIMEOUT.
+  MatchFixture ended(key);
+  ended.Start();
+  LoadAll(ended);
+  ended.m_fixture.m_output.Clear();
+  ended.m_manager.OnClosed(2, false);
+  ExpectDropped(ended, 1, 1, relay::DROP_LEFT, 29, 0x05, 0);
+
+  MatchFixture lost(key);
+  lost.Start();
+  LoadAll(lost);
+  lost.Send(0, {FrameInfo(0, 30, 0)});
+  lost.m_fixture.m_output.Clear();
+  lost.m_manager.OnClosed(1, true); // The leader is lost. Slot 1 leads after it.
+  ExpectDropped(lost, 2, 0, relay::DROP_TIMEOUT, 30, 0x06, 1);
+  EXPECT_TRUE(!lost.m_manager.IsBound(1));
+}
+
+void TestCleanLeaveSendsRosterOnly(const relay::RegionKey &key) {
+  // LEAVE after PLAYERLEAVE and FRAMEINFO through the leave frame.
+  MatchFixture match(key);
+  match.Start();
+  LoadAll(match);
+  match.Send(1, {PlayerLeave(1, 30, 1), FrameInfo(1, 30, 1)});
+  match.m_fixture.m_output.Clear();
+  match.m_manager.OnLeave(2);
+  std::vector<std::vector<unsigned char>> host = ControlMessages(match.m_fixture.m_output, 1);
+  EXPECT_EQ(host.size(), 1u);
+  if (host.size() == 1) {
+    EXPECT_TRUE(IsMessage(host.at(0), relay::MSG_ROSTER, 0x05, 0));
+  }
+  EXPECT_TRUE(match.m_fixture.m_output.WasClosed(2));
+
+  // A disconnect after the leave frame, in either form, gives ROSTER only.
+  const bool LOST_FLAGS[2] = {false, true};
+  for (bool lost : LOST_FLAGS) {
+    MatchFixture closed(key);
+    closed.Start();
+    LoadAll(closed);
+    closed.Send(2, {PlayerLeave(2, 32, 2), FrameInfo(2, 30, 1), FrameInfo(2, 31, 0), FrameInfo(2, 32, 0)});
+    closed.m_fixture.m_output.Clear();
+    closed.m_manager.OnClosed(3, lost);
+    host = ControlMessages(closed.m_fixture.m_output, 1);
+    EXPECT_EQ(host.size(), 1u);
+    if (host.size() == 1) {
+      EXPECT_TRUE(IsMessage(host.at(0), relay::MSG_ROSTER, 0x03, 0));
+    }
+  }
+}
+
+void TestLeaveBeforeStartIsRosterOnly(const relay::RegionKey &key) {
+  MatchFixture match(key); // Two of three slots joined, not started.
+  match.m_fixture.m_output.Clear();
+  match.m_manager.OnClosed(2, false);
+  std::vector<std::vector<unsigned char>> host = ControlMessages(match.m_fixture.m_output, 1);
+  EXPECT_EQ(host.size(), 1u);
+  if (host.size() == 1) {
+    EXPECT_EQ(host.at(0).at(0), relay::MSG_ROSTER);
+  }
+}
+
+void TestRemovedPlayersRecordsAreNotForwarded(const relay::RegionKey &key) {
+  MatchFixture match(key);
+  match.Start();
+  LoadAll(match);
+  match.m_manager.OnClosed(2, true);
+  match.m_fixture.m_output.Clear();
+  match.Send(1, {GameCommand(1, 30)});
+  EXPECT_EQ(match.m_fixture.m_output.m_sent.size(), 0u);
+}
+
+void TestConfigDropTimes() {
+  relay::RelayConfig config;
+  std::string error;
+  EXPECT_TRUE(relay::ParseRelayConfig(FULL_CONFIG, config, error));
+  EXPECT_EQ(config.loading_time_s, 120);
+  EXPECT_EQ(config.stall_time_s, 20);
+  EXPECT_EQ(config.connection_timeout_s, 30);
+
+  std::string text = FULL_CONFIG;
+  text += "loading_time_s = 90\r\nstall_time_s = 10\r\nconnection_timeout_s = 12\r\n";
+  EXPECT_TRUE(relay::ParseRelayConfig(text, config, error));
+  EXPECT_EQ(config.loading_time_s, 90);
+  EXPECT_EQ(config.stall_time_s, 10);
+  EXPECT_EQ(config.connection_timeout_s, 12);
+
+  text = std::string(FULL_CONFIG) + "stall_time_s = 0\r\n";
+  EXPECT_TRUE(!relay::ParseRelayConfig(text, config, error));
+  EXPECT_TRUE(error.find("stall_time_s") != std::string::npos);
+}
+
+void TestRemovingPlayers(const relay::RegionKey &key) {
+  TestLoadingTimeout(key);
+  TestLoadingTimeIsConfigurable(key);
+  TestLoadingTimerNeedsStart(key);
+  TestStallNeedsFrameInfo(key);
+  TestStallDropsLowestSlot(key);
+  TestStallClockRestartsOnProgress(key);
+  TestStallTimeIsConfigurable(key);
+  TestLeaveWithoutLeaveFrameIsDrop(key);
+  TestDisconnectReasons(key);
+  TestCleanLeaveSendsRosterOnly(key);
+  TestLeaveBeforeStartIsRosterOnly(key);
+  TestRemovedPlayersRecordsAreNotForwarded(key);
+  TestConfigDropTimes();
+}
+
 } // namespace
 
 namespace {
@@ -1694,6 +1970,7 @@ int RunTests() {
   TestFailedJoinsPerSession(key);
   TestRandomValuesDiffer(key);
   TestMatchRecords(key);
+  TestRemovingPlayers(key);
 
   static_cast<void>(std::remove(key_path.c_str()));
   static_cast<void>(std::remove((key_path + ".pub").c_str()));

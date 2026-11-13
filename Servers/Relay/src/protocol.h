@@ -82,6 +82,11 @@ const std::size_t DROP_BODY_SIZE = 1 + 1 + 4;             // slot, reason, last_
 // Session limits (PROTOCOL.md 4.5, 4.7 and 6).
 const std::uint32_t SESSION_START_WAIT_MS = 30000; // Wait for all players after CREATED.
 const std::uint32_t NEVER_JOINED_LAST_FRAME = 29;  // last_frame of a slot that never sent a FRAMEINFO.
+const std::uint32_t LOADING_TIMEOUT_MS = 120000;   // Loading: LOADCOMPLETE is due this long after START.
+const std::uint32_t STALL_TIMEOUT_MS = 20000;      // Stall before a drop (PROTOCOL.md 4.7).
+// How long ENet waits for an answer from a peer before it reports the connection lost. PROTOCOL.md does not give a
+// value. This is ENet's own default maximum.
+const std::uint32_t CONNECTION_TIMEOUT_MS = 30000;
 const std::size_t CREATE_PER_ADDRESS_PER_MINUTE = 6;
 const std::size_t JOIN_PER_ADDRESS_PER_MINUTE = 12;
 const std::uint32_t RATE_WINDOW_MS = 60000;
