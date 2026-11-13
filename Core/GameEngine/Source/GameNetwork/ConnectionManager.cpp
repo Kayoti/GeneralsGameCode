@@ -46,7 +46,11 @@
 #include "GameNetwork/LANAPICallbacks.h"
 #include "GameNetwork/NAT.h"
 #include "GameNetwork/NetCommandWrapperList.h"
+#include "GameNetwork/NetPacket.h"
 #include "GameNetwork/networkutil.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServerLink.h"
+#endif
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/ScriptActions.h"
 #include "GameLogic/ScriptEngine.h"
@@ -54,6 +58,40 @@
 #include "GameClient/DisconnectMenu.h"
 #include "GameClient/InGameUI.h"
 #include "WWLib/TARGA.h"
+
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 13/11/2026 Server mode record limits from PROTOCOL.md sections 4.6 and 6.
+enum
+{
+	SERVER_MIN_RECORD = 7,			///< Smallest match record, bytes.
+	SERVER_MAX_RECORD = 4096,		///< Largest match record, bytes. A command longer than this is never created.
+	SERVER_MAX_DATA = 16383,		///< Largest records payload of one DATA message, bytes.
+	SERVER_HOST_SLOT = 0,			///< The game always places the match host in slot 0.
+	SERVER_MIN_RUN_AHEAD = 4,		///< RUNAHEAD run_ahead lower bound.
+	SERVER_MAX_RUN_AHEAD = 64,		///< RUNAHEAD run_ahead upper bound.
+	SERVER_MIN_FRAME_RATE = 5,		///< RUNAHEAD frame_rate lower bound.
+	SERVER_MAX_FRAME_RATE = 60		///< RUNAHEAD frame_rate upper bound.
+};
+
+// TheSuperHackers @feature Kayoti 13/11/2026 The command types carried as match records (PROTOCOL.md 4.6). Everything else is "Not carried".
+static Bool IsServerCarriedCommand(NetCommandType type)
+{
+	switch (type) {
+	case NETCOMMANDTYPE_GAMECOMMAND:
+	case NETCOMMANDTYPE_FRAMEINFO:
+	case NETCOMMANDTYPE_PLAYERLEAVE:
+	case NETCOMMANDTYPE_RUNAHEAD:
+	case NETCOMMANDTYPE_RUNAHEADMETRICS:
+	case NETCOMMANDTYPE_CHAT:
+	case NETCOMMANDTYPE_LOADCOMPLETE:
+	case NETCOMMANDTYPE_TIMEOUTSTART:
+	case NETCOMMANDTYPE_PROGRESS:
+		return TRUE;
+	default:
+		return FALSE;
+	}
+}
+#endif // RTS_SERVERS
 
 static Bool hasValidTransferFileExtension(const AsciiString& filePath)
 {
@@ -263,8 +301,11 @@ ConnectionManager::ConnectionManager()
 	m_localUser = nullptr;
 	m_localUser = newInstance(User);
 #ifdef RTS_SERVERS
-	// TheSuperHackers @feature Kayoti 13/11/2026 Initializes the server mode flag to off.
+	// TheSuperHackers @feature Kayoti 13/11/2026 Initializes the server mode flag to off and the relay record state to empty.
 	m_serverMode = FALSE;
+	m_serverStarted = FALSE;
+	m_serverLink = nullptr;
+	m_serverSendLength = 0;
 #endif
 }
 
@@ -321,6 +362,12 @@ void ConnectionManager::init()
 	m_smallestPacketArrivalCushion = -1;
 
 	m_frameMetrics.init();
+
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 Reset the per-match relay record state. m_serverMode and m_serverLink are set after init.
+	m_serverStarted = FALSE;
+	m_serverSendLength = 0;
+#endif
 
 	TheDisconnectMenu = NEW DisconnectMenu;
 	TheDisconnectMenu->init();
@@ -402,6 +449,12 @@ void ConnectionManager::reset()
 	}
 
 	m_frameMetrics.reset();
+
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 Reset the per-match relay record state.
+	m_serverStarted = FALSE;
+	m_serverSendLength = 0;
+#endif
 }
 
 UnsignedInt ConnectionManager::getPingFrame()
@@ -422,6 +475,13 @@ Int ConnectionManager::getPingsReceived()
 Bool ConnectionManager::isPlayerConnected( Int playerID )
 {
 	DEBUG_ASSERTCRASH( playerID < MAX_SLOTS, ("ConnectionManager::isPlayerConnected - %d is an invalid player number", playerID) );
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 In server mode there are no connection objects, so a remote player
+	// is present while its frame data exists and is not quitting.
+	if (m_serverMode) {
+		return ( playerID == m_localSlot || (m_frameData[playerID] != nullptr && !m_frameData[playerID]->getIsQuitting()) );
+	}
+#endif
 	return ( playerID == m_localSlot || (m_connections[playerID] && !m_connections[playerID]->isQuitting()) );
 }
 
@@ -1114,6 +1174,13 @@ UnsignedInt ConnectionManager::getPacketRouterSlot() {
 }
 
 Bool ConnectionManager::areAllQueuesEmpty() {
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 In server mode there are no connection queues; the only
+	// pending traffic is the records still waiting to be flushed to the relay.
+	if (m_serverMode) {
+		return (m_serverSendLength == 0);
+	}
+#endif
 	Bool retval = TRUE;
 	for (Int i = 0; (i < MAX_SLOTS) && retval; ++i) {
 		if (m_connections[i] != nullptr) {
@@ -1290,6 +1357,338 @@ void ConnectionManager::sendRemoteCommand(NetCommandRef *msg) {
 	}
 }
 
+#ifdef RTS_SERVERS
+/**
+ * Server mode replacement for update(). Polls the relay link, turns events into local state
+ * or records, drives the "waiting" screen, and sends everything queued this tick.
+ */
+void ConnectionManager::updateServerMode(Bool isInGame)
+{
+	if (m_serverLink != nullptr) {
+		m_serverLink->update();
+
+		ServerLinkEvent event;
+		while (m_serverLink->nextEvent(event)) {
+			switch (event.type) {
+				case ServerLinkEvent::TYPE_WELCOME:
+				case ServerLinkEvent::TYPE_ROSTER:
+					// The packet router slot follows the relay's leader_slot (PROTOCOL.md 4.6 "Leader slot").
+					m_packetRouterSlot = event.leaderSlot;
+					break;
+
+				case ServerLinkEvent::TYPE_START:
+					m_packetRouterSlot = event.leaderSlot;
+					m_serverStarted = TRUE;
+					break;
+
+				case ServerLinkEvent::TYPE_DATA:
+					processServerDataMessage(event.data, event.dataLength);
+					break;
+
+				case ServerLinkEvent::TYPE_DROP:
+					handleServerDrop(event.slot, event.lastFrame);
+					break;
+
+				case ServerLinkEvent::TYPE_REFUSE:
+				case ServerLinkEvent::TYPE_LOST:
+					// The relay connection ended. End the match for the local player with a message.
+					if (TheInGameUI != nullptr) {
+						TheInGameUI->messageNoFormat(UnicodeString(L"Lost connection to the server."));
+					}
+					m_serverLink = nullptr;
+					if (TheGameLogic != nullptr) {
+						TheGameLogic->clearGameData();
+					}
+					return;
+
+				case ServerLinkEvent::TYPE_CREATED:
+				case ServerLinkEvent::TYPE_NONE:
+				default:
+					break;
+			}
+		}
+	}
+
+	// The disconnect manager still shows a "waiting" screen if frames stall, but in server mode it
+	// never starts a vote and never removes a player. Removal comes only from a DROP or a leave command.
+	if (isInGame) {
+		m_disconnectManager->update(this);
+	}
+
+	// Send everything queued this tick as one DATA message.
+	flushServerSend();
+
+	// Delete frame data for slots that have reached their quit frame, as the normal update does.
+	for (Int i = 0; i < MAX_SLOTS; ++i) {
+		if ((m_frameData[i] != nullptr) && (m_frameData[i]->getIsQuitting() == TRUE)) {
+			if (m_frameData[i]->getQuitFrame() == TheGameLogic->getFrame()) {
+				DEBUG_LOG(("ConnectionManager::updateServerMode - deleting frame data for slot %d on quitting frame %d", i, m_frameData[i]->getQuitFrame()));
+				deleteInstance(m_frameData[i]);
+				m_frameData[i] = nullptr;
+			}
+		}
+	}
+}
+
+/**
+ * Server mode replacement for the send paths. A synchronized command destined for the local slot
+ * still executes locally; a carried command also becomes a relay record. A command longer than
+ * 4096 bytes is dropped entirely, and a "Not carried" command is never sent.
+ */
+void ConnectionManager::sendServerModeCommand(NetCommandMsg *msg, UnsignedByte relay)
+{
+	const NetCommandType type = msg->getNetCommandType();
+	const UnsignedInt recordSize = (UnsignedInt)msg->getSizeForNetPacket();
+
+	// PROTOCOL.md 4.6 Size: never create a command longer than 4096 bytes. It is not sent and not
+	// counted, so drop it before the local frame data add too, keeping every client in step.
+	if (recordSize > (UnsignedInt)SERVER_MAX_RECORD) {
+		DEBUG_LOG(("ConnectionManager::sendServerModeCommand - dropping over-size command of type %s (%d bytes)",
+			GetNetCommandTypeAsString(type), recordSize));
+		return;
+	}
+
+	// A synchronized command for the local slot still goes into the local frame data for execution.
+	if ((relay & (1 << m_localSlot)) && (m_frameData[m_localSlot] != nullptr) && IsCommandSynchronized(type)) {
+		m_frameData[m_localSlot]->addNetCommandMsg(msg);
+	}
+
+	// Only carried commands travel to the relay.
+	if (!IsServerCarriedCommand(type)) {
+		return;
+	}
+
+	queueServerRecord(msg, relay, recordSize);
+}
+
+/**
+ * Append one carried command, in full form, as a length-prefixed record to the outgoing DATA buffer.
+ */
+void ConnectionManager::queueServerRecord(NetCommandMsg *msg, UnsignedByte relay, UnsignedInt recordSize)
+{
+	// Nothing is sent before START (PROTOCOL.md 4.5 step 9).
+	if (!m_serverStarted) {
+		return;
+	}
+	if ((recordSize < (UnsignedInt)SERVER_MIN_RECORD) || (recordSize > (UnsignedInt)SERVER_MAX_RECORD)) {
+		return;
+	}
+
+	// Flush first if this record would overflow the DATA buffer.
+	if (m_serverSendLength + (UnsignedInt)sizeof(UnsignedShort) + recordSize > (UnsignedInt)SERVER_MAX_DATA) {
+		flushServerSend();
+	}
+
+	UnsignedByte *out = m_serverSendBuffer + m_serverSendLength;
+	// Little-endian u16 length prefix.
+	out[0] = (UnsignedByte)(recordSize & 0xff);
+	out[1] = (UnsignedByte)((recordSize >> 8) & 0xff);
+
+	NetCommandRef *ref = NEW_NETCOMMANDREF(msg);
+	ref->setRelay(relay);
+	msg->copyBytesForNetPacket(out + sizeof(UnsignedShort), *ref);
+	deleteInstance(ref);
+
+	m_serverSendLength += (UnsignedInt)sizeof(UnsignedShort) + recordSize;
+}
+
+/**
+ * Send the queued records as one DATA message, then empty the buffer.
+ */
+void ConnectionManager::flushServerSend()
+{
+	if (m_serverSendLength == 0) {
+		return;
+	}
+	if (m_serverLink != nullptr) {
+		m_serverLink->sendData(m_serverSendBuffer, m_serverSendLength);
+	}
+	m_serverSendLength = 0;
+}
+
+/**
+ * Split a received DATA message into records. Everything from the network is treated as hostile:
+ * every record length is checked before it is used.
+ */
+void ConnectionManager::processServerDataMessage(const UnsignedByte *data, UnsignedInt length)
+{
+	if (data == nullptr) {
+		return;
+	}
+
+	UnsignedInt offset = 0;
+	while (offset + sizeof(UnsignedShort) <= length) {
+		const UnsignedInt recordLen = (UnsignedInt)data[offset] | ((UnsignedInt)data[offset + 1] << 8);
+		offset += sizeof(UnsignedShort);
+
+		if ((recordLen < (UnsignedInt)SERVER_MIN_RECORD) || (recordLen > (UnsignedInt)SERVER_MAX_RECORD)) {
+			// Malformed length: stop reading the rest of this message.
+			break;
+		}
+		if (offset + recordLen > length) {
+			// Record runs past the end of the message.
+			break;
+		}
+
+		processServerRecord(data + offset, recordLen);
+		offset += recordLen;
+	}
+}
+
+/**
+ * Turn one received record back into a command, apply the client checks of PROTOCOL.md 4.6, and
+ * either queue it in the sender's frame data (synchronized) or handle it at once (the rest). No
+ * acknowledgement is sent and nothing is relayed. A record that fails any check is discarded.
+ */
+void ConnectionManager::processServerRecord(const UnsignedByte *data, UnsignedInt length)
+{
+	NetCommandRef *ref = NetPacket::ConstructNetCommandMsgFromRawData(data, length);
+	if (ref == nullptr) {
+		// Failed to parse.
+		return;
+	}
+
+	NetCommandMsg *msg = ref->getCommand();
+	if (msg == nullptr) {
+		deleteInstance(ref);
+		return;
+	}
+
+	const NetCommandType type = msg->getNetCommandType();
+	const UnsignedInt playerID = msg->getPlayerID();
+
+	// The sender slot is taken from the record. Never accept an out-of-range slot, our own slot
+	// coming back, or a slot that is not in this match.
+	if ((playerID >= MAX_SLOTS) || (playerID == (UnsignedInt)m_localSlot) || (m_frameData[playerID] == nullptr)) {
+		deleteInstance(ref);
+		return;
+	}
+
+	// "Not carried" types are discarded. This also drops DESTROYPLAYER and every other not-carried type.
+	if (!IsServerCarriedCommand(type)) {
+		deleteInstance(ref);
+		return;
+	}
+
+	// Client per-type checks (PROTOCOL.md 4.6 "Client checks on received records").
+	Bool accept = TRUE;
+	switch (type) {
+		case NETCOMMANDTYPE_RUNAHEAD: {
+			const NetRunAheadCommandMsg *runAheadMsg = (const NetRunAheadCommandMsg *)msg;
+			const UnsignedInt runAheadValue = runAheadMsg->getRunAhead();
+			const UnsignedInt frameRateValue = runAheadMsg->getFrameRate();
+			if ((playerID != (UnsignedInt)m_packetRouterSlot)
+				|| (runAheadValue < (UnsignedInt)SERVER_MIN_RUN_AHEAD) || (runAheadValue > (UnsignedInt)SERVER_MAX_RUN_AHEAD)
+				|| (frameRateValue < (UnsignedInt)SERVER_MIN_FRAME_RATE) || (frameRateValue > (UnsignedInt)SERVER_MAX_FRAME_RATE)) {
+				accept = FALSE;
+			}
+			break;
+		}
+		case NETCOMMANDTYPE_PLAYERLEAVE:
+			if ((UnsignedInt)((const NetPlayerLeaveCommandMsg *)msg)->getLeavingPlayerID() != playerID) {
+				accept = FALSE;
+			}
+			break;
+		case NETCOMMANDTYPE_TIMEOUTSTART:
+			if (playerID != (UnsignedInt)SERVER_HOST_SLOT) {
+				accept = FALSE;
+			}
+			break;
+		default:
+			break;
+	}
+
+	if (!accept) {
+		deleteInstance(ref);
+		return;
+	}
+
+	// Drop a synchronized command whose frame has already passed, as the normal relay path does.
+	if (IsCommandSynchronized(type) && (msg->getExecutionFrame() < TheGameLogic->getFrame())) {
+		deleteInstance(ref);
+		return;
+	}
+
+	if (IsCommandSynchronized(type)) {
+		// GAMECOMMAND, PLAYERLEAVE and RUNAHEAD wait in the sender's frame data for their frame.
+		m_frameData[playerID]->addNetCommandMsg(msg);
+	} else {
+		switch (type) {
+			case NETCOMMANDTYPE_FRAMEINFO:
+				processFrameInfo((NetFrameCommandMsg *)msg);
+				break;
+			case NETCOMMANDTYPE_RUNAHEADMETRICS:
+				processRunAheadMetrics((NetRunAheadMetricsCommandMsg *)msg);
+				break;
+			case NETCOMMANDTYPE_CHAT:
+				processChat((NetChatCommandMsg *)msg);
+				break;
+			case NETCOMMANDTYPE_PROGRESS:
+				processProgress((NetProgressCommandMsg *)msg);
+				break;
+			case NETCOMMANDTYPE_LOADCOMPLETE:
+				processLoadComplete(msg);
+				break;
+			case NETCOMMANDTYPE_TIMEOUTSTART:
+				processTimeOutGameStart(msg);
+				break;
+			default:
+				break;
+		}
+	}
+
+	deleteInstance(ref);
+}
+
+/**
+ * Apply a DROP from the relay (PROTOCOL.md 4.7). The dropped slot's records above last_frame are
+ * discarded, the slot is kept through last_frame, and at last_frame + 1 the engine's destroy-player
+ * action runs locally for that slot. Because every client uses the same last_frame, every client
+ * removes the slot on the same frame and the simulation stays in step.
+ */
+void ConnectionManager::handleServerDrop(UnsignedByte slot, UnsignedInt lastFrame)
+{
+	if (slot >= MAX_SLOTS) {
+		return;
+	}
+	// Ignore a DROP for a slot that has already been removed.
+	if (m_frameData[slot] == nullptr) {
+		return;
+	}
+
+	DEBUG_LOG(("ConnectionManager::handleServerDrop - slot %d, last frame %d, on frame %d",
+		slot, lastFrame, TheGameLogic->getFrame()));
+
+	// If the match is still loading, count the slot as loaded so loading can finish. Outside loading
+	// this is a harmless no-op.
+	if (TheGameLogic != nullptr) {
+		TheGameLogic->processProgressComplete(slot);
+	}
+
+	// Discard every record held from that slot above last_frame. A command can reach at most run-ahead
+	// frames past last_frame, which is well within MAX_FRAMES_AHEAD.
+	for (UnsignedInt f = lastFrame + 1; f <= lastFrame + MAX_FRAMES_AHEAD; ++f) {
+		m_frameData[slot]->resetFrame(f, FALSE);
+	}
+
+	// At last_frame + 1, apply locally what the engine's destroy-player command does for that slot.
+	NetDestroyPlayerCommandMsg *destroyMsg = newInstance(NetDestroyPlayerCommandMsg);
+	destroyMsg->setExecutionFrame(lastFrame + 1);
+	destroyMsg->setPlayerID(slot);
+	destroyMsg->setPlayerIndex(slot);
+	if (DoesCommandRequireACommandID(destroyMsg->getNetCommandType())) {
+		destroyMsg->setID(GenerateNextCommandID());
+	}
+	m_frameData[slot]->addNetCommandMsg(destroyMsg);
+	destroyMsg->detach();
+
+	// The slot is present through last_frame and absent from last_frame + 1. Marking the frame data
+	// quitting stops allCommandsReady from waiting for it; the data survives until the quit frame so
+	// the destroy at last_frame + 1 still executes.
+	m_frameData[slot]->setQuitFrame(lastFrame + 1 + FRAMES_TO_KEEP + 1);
+}
+#endif // RTS_SERVERS
+
 /**
  * ConnectionManager::update
  * Update the connections. Tell them to do the receive and send.  Also relay
@@ -1303,6 +1702,14 @@ void ConnectionManager::update(Bool isInGame) {
 // 4. blow something up
 // 5. bust some cap
 //
+
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 In server mode the match runs through the relay, not a transport.
+	if (m_serverMode) {
+		updateServerMode(isInGame);
+		return;
+	}
+#endif
 
 	if ((m_localAddr == 0) || (m_localPort == 0)) {
 		// we don't have a local address or port yet, this is bad.
@@ -1486,7 +1893,15 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 			} else {
 				//DEBUG_LOG(("ConnectionManager::updateRunAhead - average latency = %f, average fps = %d, didSelfSlug = false", m_frameMetrics.getAverageLatency(), m_frameMetrics.getAverageFPS()));
 			}
-			m_connections[m_packetRouterSlot]->sendNetCommandMsg(msg, 1 << m_packetRouterSlot);
+#ifdef RTS_SERVERS
+			// TheSuperHackers @feature Kayoti 13/11/2026 In server mode the metrics travel to the leader as a record, not over a player connection.
+			if (m_serverMode) {
+				sendServerModeCommand(msg, 1 << m_packetRouterSlot);
+			} else
+#endif
+			{
+				m_connections[m_packetRouterSlot]->sendNetCommandMsg(msg, 1 << m_packetRouterSlot);
+			}
 			msg->detach();
 		}
 		lasttimesent = curTime;
@@ -1611,6 +2026,13 @@ void ConnectionManager::sendLocalGameMessage(GameMessage *msg, UnsignedInt frame
  * in the relay field.  Commands sent in this way go through the packet router.
  */
 void ConnectionManager::sendLocalCommand(NetCommandMsg *msg, UnsignedByte relay /* = 0xff by default*/) {
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 In server mode every outgoing command becomes a relay record.
+	if (m_serverMode) {
+		sendServerModeCommand(msg, relay);
+		return;
+	}
+#endif
 	if (CommandRequiresDirectSend(msg) || (m_packetRouterSlot < 0) || (m_packetRouterSlot >= MAX_SLOTS) || (m_connections[m_packetRouterSlot] == nullptr)) {
 		sendLocalCommandDirect(msg, relay);
 		return;
@@ -1661,6 +2083,13 @@ void ConnectionManager::sendLocalCommand(NetCommandMsg *msg, UnsignedByte relay 
  * in the relay field.  Commands sent in this way do not go through the packet router.
  */
 void ConnectionManager::sendLocalCommandDirect(NetCommandMsg *msg, UnsignedByte relay) {
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 In server mode every outgoing command becomes a relay record.
+	if (m_serverMode) {
+		sendServerModeCommand(msg, relay);
+		return;
+	}
+#endif
 	msg->attach();
 
 	if (((relay & (1 << m_localSlot)) != 0) && (m_frameData[m_localSlot] != nullptr)) {
@@ -2002,7 +2431,22 @@ UnicodeString ConnectionManager::getPlayerName(Int playerNum) {
 	UnicodeString retval;
 	if( playerNum == m_localSlot ) {
 		retval = m_localUser->GetName();
-	}	else if (((m_connections[playerNum] != nullptr) && (m_connections[playerNum]->isQuitting() == FALSE))) {
+		return retval;
+	}
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 In server mode there are no connection objects, so a remote
+	// player's name comes from the match slot list instead.
+	if (m_serverMode) {
+		if ((playerNum >= 0) && (playerNum < MAX_SLOTS) && TheGameInfo != nullptr) {
+			const GameSlot *gameSlot = TheGameInfo->getConstSlot(playerNum);
+			if (gameSlot != nullptr) {
+				retval = gameSlot->getName();
+			}
+		}
+		return retval;
+	}
+#endif
+	if (((m_connections[playerNum] != nullptr) && (m_connections[playerNum]->isQuitting() == FALSE))) {
 		retval = m_connections[playerNum]->getUser()->GetName();
 	}
 	return retval;
@@ -2034,12 +2478,18 @@ void ConnectionManager::parseUserList(const GameInfo *game)
 
 			if (m_localSlot != i)
 			{
-				m_connections[i] = newInstance(Connection)();
-				m_connections[i]->init();
-				m_connections[i]->attachTransport(m_transport);
-//				UnsignedShort port = (TheNAT)?TheNAT->getSlotPort(i):8088;
-				UnsignedShort port = slot->getPort();
-				m_connections[i]->setUser(newInstance(User)(slot->getName(), slot->getIP(), port));
+#ifdef RTS_SERVERS
+				// TheSuperHackers @feature Kayoti 13/11/2026 In server mode there are no player-to-player connections and no transport; only frame data.
+				if (!m_serverMode)
+#endif
+				{
+					m_connections[i] = newInstance(Connection)();
+					m_connections[i]->init();
+					m_connections[i]->attachTransport(m_transport);
+//					UnsignedShort port = (TheNAT)?TheNAT->getSlotPort(i):8088;
+					UnsignedShort port = slot->getPort();
+					m_connections[i]->setUser(newInstance(User)(slot->getName(), slot->getIP(), port));
+				}
 				m_frameData[i] = newInstance(FrameDataManager)(FALSE);
 				DEBUG_LOG(("Remote user is at %X:%d", slot->getIP(), slot->getPort()));
 			}
@@ -2380,6 +2830,12 @@ Int ConnectionManager::getFileTransferProgress(Int playerID, AsciiString path)
 
 
 void ConnectionManager::voteForPlayerDisconnect(Int slot) {
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 In server mode players are never voted out. The relay drops a stuck player.
+	if (m_serverMode) {
+		return;
+	}
+#endif
 	if (m_disconnectManager != nullptr) {
 		m_disconnectManager->voteForPlayerDisconnect(slot, this);
 	}
