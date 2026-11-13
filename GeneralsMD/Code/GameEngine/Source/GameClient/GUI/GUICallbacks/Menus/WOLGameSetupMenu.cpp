@@ -1767,6 +1767,8 @@ static Bool updateServersMatchStart()
 				s_serversStartPending = FALSE;
 				if( buttonStart ) buttonStart->winEnable( TRUE );
 				if( buttonBack ) buttonBack->winEnable( TRUE );
+				GameWindow *buttonBuddy = TheWindowManager->winGetWindowFromId( nullptr, NAMEKEY("GameSpyGameOptionsMenu.wnd:ButtonCommunicator") );
+				if( buttonBuddy ) buttonBuddy->winEnable( TRUE );
 				if( myGame )
 					TheGameSpyInfo->addText( TheGameText->fetch( "GUI:ServersStartRosterChanged" ), GameSpyColor[GSCOLOR_DEFAULT], listboxGameSetupChat );
 				return FALSE;
@@ -1825,6 +1827,8 @@ static Bool updateServersMatchStart()
 				// Keep the lobby open with Start enabled again (PROTOCOL.md 5.4 step 3).
 				if( buttonStart ) buttonStart->winEnable( TRUE );
 				if( buttonBack ) buttonBack->winEnable( TRUE );
+				GameWindow *buttonBuddy = TheWindowManager->winGetWindowFromId( nullptr, NAMEKEY("GameSpyGameOptionsMenu.wnd:ButtonCommunicator") );
+				if( buttonBuddy ) buttonBuddy->winEnable( TRUE );
 				if( myGame )
 					TheGameSpyInfo->addText( ServersModeRefusalText( SERVER_REFUSE_NO_ANSWER, 0, 0 ), GameSpyColor[GSCOLOR_DEFAULT], listboxGameSetupChat );
 				return FALSE;
