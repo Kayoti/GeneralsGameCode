@@ -110,7 +110,7 @@ int RunRelay(int argc, char **argv) {
 
   int exit_code = 0;
   {
-    relay::RelayHost host(config.listen_port, entry_settings);
+    relay::RelayHost host(config.listen_port, entry_settings, options.m_check_address, config.max_sessions);
     if (!host.Start(error)) {
       relay::LogError("relay: %s", error.c_str());
       exit_code = 1;
