@@ -8,6 +8,7 @@
 // --generate-key writes a new region key pair and exits.
 
 #include "config.h"
+#include "entry_check.h"
 #include "host.h"
 #include "log.h"
 #include "region_keys.h"
@@ -102,9 +103,14 @@ int RunRelay(int argc, char **argv) {
     return 1;
   }
 
+  relay::EntryCheckSettings entry_settings;
+  entry_settings.region = config.region;
+  entry_settings.ping_limit_ms = config.ping_limit_ms;
+  entry_settings.key = region_key;
+
   int exit_code = 0;
   {
-    relay::RelayHost host(config.listen_port);
+    relay::RelayHost host(config.listen_port, entry_settings);
     if (!host.Start(error)) {
       relay::LogError("relay: %s", error.c_str());
       exit_code = 1;

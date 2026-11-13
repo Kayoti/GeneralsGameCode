@@ -1,6 +1,8 @@
-// The relay's ENet host: listens for connections, logs them, and enforces the first-message deadline
-// (PROTOCOL.md 4.1 and 6).
+// The relay's ENet host: listens for connections, logs them, enforces the first-message deadline
+// (PROTOCOL.md 4.1 and 6) and runs the entry check (PROTOCOL.md 4.4).
 #pragma once
+
+#include "entry_check.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +16,7 @@ namespace relay {
 
 class RelayHost {
 public:
-  explicit RelayHost(std::uint16_t listen_port);
+  RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings);
   ~RelayHost();
 
   RelayHost(const RelayHost &) = delete;
@@ -35,9 +37,23 @@ private:
   void OnReceive(_ENetPeer *peer, std::uint8_t channel_id, const unsigned char *data, std::size_t length);
   void CheckFirstMessageDeadlines();
 
+  void OnCheckHello(_ENetPeer *peer, Connection *connection, const unsigned char *data);
+  void OnPong(Connection *connection, const unsigned char *data);
+  void ServiceEntryChecks();
+  void ServiceEntryCheck(_ENetPeer *peer, Connection *connection, std::uint32_t now_ms);
+  void FinishEntryCheck(_ENetPeer *peer, Connection *connection);
+  void SendPing(_ENetPeer *peer, Connection *connection, std::uint32_t now_ms);
+  void SendPass(_ENetPeer *peer, Connection *connection, std::uint16_t rtt_ms);
+  void RefuseAndClose(_ENetPeer *peer, Connection *connection, std::uint8_t code, std::uint16_t rtt_ms,
+                      std::uint16_t limit_ms);
+  void CloseEntryCheck(_ENetPeer *peer, Connection *connection);
+  std::uint32_t WaitMs() const;
+
   std::uint16_t listen_port_;
   std::uint32_t next_connection_id_;
   _ENetHost *host_;
+  EntryCheckSettings settings_;
+  AddressRateLimiter rate_limiter_;
 };
 
 } // namespace relay

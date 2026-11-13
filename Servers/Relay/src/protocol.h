@@ -67,6 +67,7 @@ const std::size_t PASS_SIZE = 100;
 const std::size_t CHECK_HELLO_BODY_SIZE = 2 + 4 + 4;          // proto, exe_crc, ini_crc
 const std::size_t PING_BODY_SIZE = 8;                         // nonce
 const std::size_t PONG_BODY_SIZE = 8;                         // nonce
+const std::size_t REFUSE_BODY_SIZE = 1 + 2 + 2;               // code, rtt_ms, limit_ms
 const std::size_t CREATE_BODY_SIZE = 2 + PASS_SIZE + 1 + 1;   // proto, pass, host_slot, slot_mask
 const std::size_t JOIN_BODY_SIZE = 2 + PASS_SIZE + 8 + 1 + 8; // proto, pass, session_id, slot, join_token
 
