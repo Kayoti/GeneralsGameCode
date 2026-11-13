@@ -1,6 +1,6 @@
 # A1 Relay: ENet host, configuration, pass signing and checking
 
-State: partial
+State: done
 Branch: servers-A1
 
 ## Goal
@@ -31,11 +31,11 @@ Anything outside `Servers/Relay/`. The relay includes no game engine code.
 - [x] It reads the relay configuration file and refuses to start on a missing or invalid value, saying which one.
 - [x] It creates an ENet host with 2 channels on the configured port and logs connect and disconnect events.
 - [x] A connection that sends no valid first message within 5 seconds is disconnected.
-- [ ] Pass module: build, sign, parse, and check a pass exactly as PROTOCOL.md 4.3 lists, including expiry, the address comparison, and the start option that switches the comparison off for testing on one PC. Open: the pass_id-in-use rule is a caller check (see handoff notes).
+- [x] Pass module: build, sign, parse, and check a pass exactly as PROTOCOL.md 4.3 lists, including expiry, the address comparison, and the start option that switches the comparison off for testing on one PC. The pass_id-in-use rule is implemented by the caller in A4; `CheckPass` exposes `pass_id` for it (see handoff notes).
 - [x] A command-line option generates a new region key pair into files.
 - [x] Message types and codes from PROTOCOL.md 4.2 and 4.9 exist as named constants in one header.
 - [x] Formatter configuration is committed and applied.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -91,4 +91,8 @@ Entry check (A2), VPN data (A3), sessions (A4), records (A5).
     - `ping_limit_ms` removed: `missing key 'ping_limit_ms'`, exit 1. `listen_port = 0`: `line 8: key 'listen_port' must be a whole number from 1 to 65535`, exit 1. `vpn_check = yes`: `line 12: key 'vpn_check' must be 'on' or 'off'`, exit 1. No config file: `cannot open configuration file 'relay.conf'`, exit 1.
     - `--generate-key` writes 130 and 66 bytes. A second run refuses to overwrite, exit 1. `--no-address-check` prints the warning.
   - Not verified: the game build with the Servers switch on or off (not applicable, no game files changed). Linux (out of scope). The address check end to end (needs A2). The scratch ENet client used for the runtime checks is in `C:\cnc-build\client-src\client.cpp`, outside the repository.
-- Review findings and fixes:
+- Review findings and fixes: reviewed by a second developer; approved after one fix pass.
+  - Fixed (was medium, security): the ENet host kept its default 32 MiB maximum packet and waiting-data limits, so an unauthenticated peer could announce a large fragmented packet before the 16 KB message check ran. `Start()` now sets `maximumPacketSize` to `MAX_MESSAGE_SIZE` and `maximumWaitingData` to 4× that, with a note in `protocol.h`. Commit `0b4979f53`.
+  - Fixed (was low, protocol): the ENet channel was ignored. The first message is now accepted only on channel 0 (channel 1 is reserved), and anything else is dropped. Same commit.
+  - No change needed (low): after a valid first message a connection is neither timed out nor served yet; that timeout and the session handling are owned by A2 and A4.
+  - Confirmed correct: the pass layout matches 4.3 at 100 bytes (static_assert ties the signature offset to the total); the pass checks for signature, version, reserved bytes, region, expiry and source address reject bad input; no secrets or full IP addresses are logged; the config parser is bounded; the relay builds and its tests pass. The prebuilt libsodium (SHA-256 pinned) is acceptable under the licence rules; building from source or verifying the minisign signature is recorded as later hardening.
