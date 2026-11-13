@@ -32,7 +32,7 @@ Anything outside `Servers/Relay/`.
 - [x] Clean leave: after a forwarded `PLAYERLEAVE` and every `FRAMEINFO` through its leave frame, `LEAVE` or a disconnect produces `ROSTER` only.
 - [x] A disconnect before that point produces a normal `DROP`.
 - [x] The ENet timeout that decides "connection lost", the loading time and the stall time are configuration values.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -62,4 +62,8 @@ Dropping a player for being slower than the server clock (S1, S3).
   - Built with `cmake -S Servers/Relay -B C:\cnc-build\A6 -G Ninja -DCMAKE_BUILD_TYPE=Release -DRELAY_BUILD_TESTS=ON` in the VS x86 environment, `/W4 /WX`, exit 0. `ctest`: 1 of 1 passed (`relay_tests`, prints "all relay tests passed").
   - `clang-format -i` on the changed files, then `clang-tidy` 22.1.3 with the compile database on `drop.cpp`, `sessions.cpp`, `host.cpp`, `main.cpp`, `config.cpp`, `match_data.cpp`, `relay_tests.cpp`: 0 warnings.
   - Not run: the relay against a client, the game builds (this package changes only `Servers/Relay/`).
-- Review findings and fixes:
+- Review findings and fixes: reviewed by a second developer, with a specific pass on the changed leave test and the lost-versus-closed reading. Verdict: approved, no changes required. Both findings are low.
+  - A slot that completed a clean leave but stays connected and idle is still eligible for the stall rule, so a very late LEAVE could drop it with TIMEOUT instead of ROSTER-only. Cosmetic only: the other clients already removed that slot through the forwarded leave command, so per 4.7 they ignore the DROP and there is no desync. Left as is.
+  - The lost-versus-closed decision (a peer silent for at least half the configured timeout is treated as lost) and the ENet peer-timeout wiring are exercised only against a real peer and have no unit test. The reviewer judged the logic sound; a misclassification would change only the DROP reason byte, which clients use for nothing that affects the simulation, so it cannot break sync. Confirmed needing a live run.
+  - Confirmed correct: every 4.7 cause maps to the right 4.9 reason (lost -> TIMEOUT, leave/disconnect before the leave frame -> LEFT, loading and stall -> TIMEOUT, with NEVER_JOINED and PROTOCOL unchanged from A4/A5); the loading rule fires at 120 s after START only; the stall rule needs a forwarded FRAMEINFO, drops only the strictly-lowest idle slot, and restarts on progress; drops reuse A5's `DropConnection` with `last_frame = next_frame - 1`; a clean leave gives ROSTER only, gated on PLAYERLEAVE and all FRAMEINFO through the leave frame; the drop and loading/stall times are config values that reject 0; the snapshot-then-drop-by-id loop has no use-after-free and no double drop; scope is `Servers/Relay/` only.
+  - The changed A4 test `TestLeaderAndLeaving` was verified as a correct, stricter behaviour required by 4.7 (a leave without a leave frame in a started match is DROP then ROSTER), not a weakened test.
