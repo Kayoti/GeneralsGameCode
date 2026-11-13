@@ -91,6 +91,50 @@ UnicodeString ServersModeRefusalText( UnsignedByte code, UnsignedShort rttMs, Un
 	}
 }
 
+// Lobby tag --------------------------------------------------------------------------------------
+
+// The region file as the lobby list filter sees it. It is read once, on first use.
+static ServerRegions *s_tagRegions = nullptr;
+static Bool s_tagRegionsLoaded = FALSE;
+
+static const ServerRegions *getTagRegions()
+{
+	if( !s_tagRegionsLoaded )
+	{
+		s_tagRegionsLoaded = TRUE;
+		s_tagRegions = NEW ServerRegions;
+		if( !s_tagRegions->load( SERVERS_REGION_FILE ) )
+		{
+			DEBUG_LOG(( "Servers: no lobby tags from %s: %s", SERVERS_REGION_FILE, s_tagRegions->getError() ));
+		}
+	}
+	return s_tagRegions;
+}
+
+Bool ServersModeIsAnyTag( const AsciiString &ladderIP, UnsignedShort ladderPort )
+{
+	if( ladderPort == 0 )
+		return FALSE;
+
+	const ServerRegions *regions = getTagRegions();
+	return regions != nullptr && regions->findByTag( ladderIP.str(), ladderPort ) != nullptr;
+}
+
+Bool ServersModeIsOwnTag( const AsciiString &ladderIP, UnsignedShort ladderPort )
+{
+	return s_state.on && ladderPort != 0
+		&& ladderPort == s_state.region.tagPort
+		&& ladderIP == s_state.region.tag;
+}
+
+Bool ServersModeShowsLobby( const AsciiString &ladderIP, UnsignedShort ladderPort )
+{
+	if( s_state.on )
+		return ServersModeIsOwnTag( ladderIP, ladderPort );
+
+	return !ServersModeIsAnyTag( ladderIP, ladderPort );
+}
+
 // Entry check ------------------------------------------------------------------------------------
 
 static ServerRegions *s_regions = nullptr;

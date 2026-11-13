@@ -59,6 +59,9 @@
 #include "GameNetwork/GameSpy/PeerThread.h"
 #include "GameNetwork/GameSpy/PersistentStorageDefs.h"
 #include "GameNetwork/GameSpy/GSConfig.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/GameSpy/ServersMode.h"
+#endif
 
 #include "Common/STLTypedefs.h"
 
@@ -692,6 +695,13 @@ void RefreshGameListBox( GameWindow *win, Bool showMap )
 	populateBuddyGames();
 	for (StagingRoomMap::iterator srmIt = srm->begin(); srmIt != srm->end(); ++srmIt)
 	{
+#ifdef RTS_SERVERS
+		// TheSuperHackers @feature Kayoti 13/11/2026 Servers mode lists only lobbies tagged for its region, Online hides tagged lobbies.
+		if (srmIt->second && !ServersModeShowsLobby(srmIt->second->getLadderIP(), srmIt->second->getLadderPort()))
+		{
+			continue;
+		}
+#endif
 		sgl.insert(srmIt->second);
 	}
 

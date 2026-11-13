@@ -68,6 +68,9 @@
 #include "GameNetwork/GameSpy/PersistentStorageDefs.h"
 #include "GameNetwork/GameSpy/PersistentStorageThread.h"
 #include "GameNetwork/GameSpy/LobbyUtils.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/GameSpy/ServersMode.h"
+#endif
 #include "GameNetwork/RankPointValue.h"
 
 void refreshGameList( Bool forceRefresh = FALSE );
@@ -1590,6 +1593,11 @@ WindowMsgHandledType WOLLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 #endif
 								}
 								Bool unknownLadder = (roomToJoin->getLadderPort() && TheLadderList->findLadder(roomToJoin->getLadderIP(), roomToJoin->getLadderPort()) == nullptr);
+#ifdef RTS_SERVERS
+								// TheSuperHackers @feature Kayoti 13/11/2026 The tag of the player's region is a known ladder in Servers mode.
+								if (unknownLadder && ServersModeIsOwnTag(roomToJoin->getLadderIP(), roomToJoin->getLadderPort()))
+									unknownLadder = FALSE;
+#endif
 								if (unknownLadder)
 								{
 									GSMessageBoxOk(TheGameText->fetch("GUI:JoinFailedDefault"), TheGameText->fetch("GUI:JoinFailedUnknownLadder"));

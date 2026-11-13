@@ -71,6 +71,9 @@
 #include "GameNetwork/GameSpy/LadderDefs.h"
 #include "Common/CustomMatchPreferences.h"
 #include "Common/LadderPreferences.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/GameSpy/ServersMode.h"
+#endif
 
 //-----------------------------------------------------------------------------
 // DEFINES ////////////////////////////////////////////////////////////////////
@@ -343,6 +346,11 @@ void PopupHostGameInit( WindowLayout *layout, void *userData )
 	if (comboBoxLadderName)
 		GadgetComboBoxReset(comboBoxLadderName);
 	PopulateCustomLadderComboBox();
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 Servers lobbies carry the region tag, so the ladder choice is hidden.
+	if (comboBoxLadderName && ServersModeIsOn())
+		comboBoxLadderName->winHide(TRUE);
+#endif
 
 	TheWindowManager->winSetFocus( parentPopup );
 	TheWindowManager->winSetModal( parentPopup );
@@ -585,6 +593,14 @@ void createGame()
 			}
 		}
 	}
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 A lobby created in Servers mode carries the tag of the player's region in its ladder fields.
+	if (ServersModeIsOn())
+	{
+		req.ladderIP = ServersModeGetRegion().tag;
+		req.stagingRoomCreation.ladPort = ServersModeGetRegion().tagPort;
+	}
+#endif
 	TheGameSpyGame->setLadderIP(req.ladderIP.c_str());
 	TheGameSpyGame->setLadderPort(req.stagingRoomCreation.ladPort);
 	req.hostPingStr = TheGameSpyInfo->getPingString().str();

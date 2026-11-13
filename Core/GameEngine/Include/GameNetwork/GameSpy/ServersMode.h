@@ -27,6 +27,7 @@
 
 #ifdef RTS_SERVERS
 
+#include "Common/AsciiString.h"
 #include "Common/UnicodeString.h"
 #include "GameNetwork/ServerEntryCheck.h"
 #include "GameNetwork/ServerRegions.h"
@@ -41,6 +42,19 @@ void ServersModeClear();																///< Turns Servers mode off and forgets 
 
 /// The text shown to the player for a refused entry check. code is a ServerRefuseCode.
 UnicodeString ServersModeRefusalText( UnsignedByte code, UnsignedShort rttMs, UnsignedShort limitMs );
+
+// Lobby tag ----------------------------------------------------------------------------------------
+// A lobby created in Servers mode carries the tag of the player's region in its ladder fields.
+// Tags are compared exactly, text and port together. Protocol: docs/servers/PROTOCOL.md, section 5.2 and 5.3.
+
+/// True if the ladder fields equal the tag of any region in the region file
+Bool ServersModeIsAnyTag( const AsciiString &ladderIP, UnsignedShort ladderPort );
+
+/// True if Servers mode is on and the ladder fields equal the tag of the player's region
+Bool ServersModeIsOwnTag( const AsciiString &ladderIP, UnsignedShort ladderPort );
+
+/// The lobby list filter. Servers mode shows only the player's region tag, otherwise tagged lobbies are hidden.
+Bool ServersModeShowsLobby( const AsciiString &ladderIP, UnsignedShort ladderPort );
 
 // Entry check ------------------------------------------------------------------------------------
 

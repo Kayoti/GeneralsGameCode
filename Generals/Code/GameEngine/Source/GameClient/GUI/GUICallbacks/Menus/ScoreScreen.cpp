@@ -96,6 +96,9 @@
 #include "GameNetwork/GameSpyOverlay.h"
 #include "GameNetwork/GameSpy/BuddyThread.h"
 #include "GameNetwork/GameSpy/PersistentStorageThread.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/GameSpy/ServersMode.h"
+#endif
 #include "GameClient/InGameUI.h"
 
 
@@ -1519,7 +1522,13 @@ winName.format("ScoreScreen.wnd:StaticTextScore%d", pos);
 					}
 
 					// send ladder results (even if we end the game in the first N seconds)
+#ifdef RTS_SERVERS
+					// TheSuperHackers @feature Kayoti 13/11/2026 A lobby tag is not a ladder, so Servers matches are not reported to it.
+					if (TheGameSpyGame->getLadderPort() && TheGameSpyGame->getLadderIP().isNotEmpty()
+						&& !ServersModeIsAnyTag(TheGameSpyGame->getLadderIP(), TheGameSpyGame->getLadderPort()))
+#else
 					if (TheGameSpyGame->getLadderPort() && TheGameSpyGame->getLadderIP().isNotEmpty())
+#endif
 					{
 						GameResultsRequest gameResReq;
 						gameResReq.hostname = TheGameSpyGame->getLadderIP().str();
@@ -1724,7 +1733,13 @@ winName.format("ScoreScreen.wnd:StaticTextScore%d", pos);
 					if (s->getTotalObjectsBuilt(pTemplate) > 0)
 						stats.builtNuke = 1;
 
+#ifdef RTS_SERVERS
+					// TheSuperHackers @feature Kayoti 13/11/2026 A lobby tag is not stored as the last ladder used.
+					if (TheGameSpyGame->getLadderPort() && TheGameSpyGame->getLadderIP().isNotEmpty()
+						&& !ServersModeIsAnyTag(TheGameSpyGame->getLadderIP(), TheGameSpyGame->getLadderPort()))
+#else
 					if (TheGameSpyGame->getLadderPort() && TheGameSpyGame->getLadderIP().isNotEmpty())
+#endif
 					{
 						stats.lastLadderPort = TheGameSpyGame->getLadderPort();
 						stats.lastLadderHost = TheGameSpyGame->getLadderIP().str();
