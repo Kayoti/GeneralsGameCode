@@ -73,6 +73,7 @@ const std::size_t JOIN_BODY_SIZE = 2 + PASS_SIZE + 8 + 1 + 8; // proto, pass, se
 // PROTOCOL.md 4.1 and 6.
 const std::uint32_t CHANNEL_COUNT = 2;
 const std::uint32_t FIRST_MESSAGE_DEADLINE_MS = 5000;
+// The ENet host's maximum packet size and waiting-data limits in host.cpp are derived from MAX_MESSAGE_SIZE.
 const std::size_t MAX_MESSAGE_SIZE = 16384; // DATA message limit (PROTOCOL.md 6).
 // Peer slots in the ENet host. PROTOCOL.md 6 allows 256 connections in total that have not sent a first message.
 const std::size_t MAX_PEERS = 256;

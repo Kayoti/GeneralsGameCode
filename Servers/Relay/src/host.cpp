@@ -14,6 +14,13 @@ namespace {
 // How long one service call waits for network activity. Deadlines are checked after each call.
 const std::uint32_t SERVICE_WAIT_MS = 100;
 
+// Every message uses channel 0 (PROTOCOL.md 4.1). Channel 1 is reserved and unused.
+const std::uint8_t MESSAGE_CHANNEL = 0;
+
+// Unreassembled data one peer may hold at a time, in messages. Four is enough for a few messages in flight
+// and keeps a single peer from holding the 32 MiB ENet default.
+const std::size_t WAITING_MESSAGES_PER_PEER = 4;
+
 // True when the message is one of the three first messages, with the exact length from PROTOCOL.md 4.2.
 bool IsFirstMessage(const unsigned char *data, std::size_t length) {
   if (length == 0) {
@@ -63,6 +70,10 @@ bool RelayHost::Start(std::string &error) {
     error = "cannot open UDP port " + std::to_string(listen_port_);
     return false;
   }
+  // ENet checks these limits while it reassembles a packet, before it allocates the buffer, so an oversize
+  // announcement is refused before any memory is used for it.
+  host_->maximumPacketSize = MAX_MESSAGE_SIZE;
+  host_->maximumWaitingData = WAITING_MESSAGES_PER_PEER * MAX_MESSAGE_SIZE;
   return true;
 }
 
@@ -91,7 +102,7 @@ void RelayHost::Dispatch(const ENetEvent &event) {
     OnDisconnect(event.peer);
     break;
   case ENET_EVENT_TYPE_RECEIVE:
-    OnReceive(event.peer, event.packet->data, event.packet->dataLength);
+    OnReceive(event.peer, event.channelID, event.packet->data, event.packet->dataLength);
     enet_packet_destroy(event.packet);
     break;
   default:
@@ -118,9 +129,14 @@ void RelayHost::OnDisconnect(ENetPeer *peer) {
   peer->data = nullptr;
 }
 
-void RelayHost::OnReceive(ENetPeer *peer, const unsigned char *data, std::size_t length) {
+void RelayHost::OnReceive(ENetPeer *peer, std::uint8_t channel_id, const unsigned char *data, std::size_t length) {
   Connection *connection = static_cast<Connection *>(peer->data);
   if (connection == nullptr) {
+    return;
+  }
+  if (channel_id != MESSAGE_CHANNEL) {
+    LogLine("connection %u: message on channel %u dropped, only channel 0 is used", connection->m_id,
+            static_cast<unsigned int>(channel_id));
     return;
   }
   if (length == 0 || length > MAX_MESSAGE_SIZE) {

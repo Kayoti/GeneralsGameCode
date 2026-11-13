@@ -32,7 +32,7 @@ private:
   void Dispatch(const _ENetEvent &event);
   void OnConnect(_ENetPeer *peer);
   void OnDisconnect(_ENetPeer *peer);
-  void OnReceive(_ENetPeer *peer, const unsigned char *data, std::size_t length);
+  void OnReceive(_ENetPeer *peer, std::uint8_t channel_id, const unsigned char *data, std::size_t length);
   void CheckFirstMessageDeadlines();
 
   std::uint16_t listen_port_;
