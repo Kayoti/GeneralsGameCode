@@ -6,6 +6,7 @@
 #include "rate_limit.h"
 #include "records.h"
 #include "sessions.h"
+#include "vpn_check.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -21,8 +22,9 @@ namespace relay {
 class RelayHost : private SessionOutput {
 public:
   // check_address is false only with the relay's test start option. max_sessions is the concurrent session limit.
-  RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings, bool check_address, std::size_t max_sessions,
-            const RecordSettings &records, const DropSettings &drop);
+  // vpn must already hold its data (VpnCheck::Load) and must outlive the host.
+  RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings, VpnCheck &vpn, bool check_address,
+            std::size_t max_sessions, const RecordSettings &records, const DropSettings &drop);
   ~RelayHost();
 
   RelayHost(const RelayHost &) = delete;
@@ -48,6 +50,7 @@ private:
   void OnDisconnect(_ENetPeer *peer);
   void OnReceive(_ENetPeer *peer, std::uint8_t channel_id, const unsigned char *data, std::size_t length);
   void CheckFirstMessageDeadlines();
+  void ReloadVpnDataIfRequested();
   void NoteReceiveTimes();
   bool ConnectionWasLost(const Connection &connection) const;
 
@@ -67,6 +70,7 @@ private:
   std::uint32_t next_connection_id_;
   _ENetHost *host_;
   EntryCheckSettings settings_;
+  VpnCheck &vpn_;
   AddressRateLimiter rate_limiter_;
   std::size_t session_limit_;
   std::uint32_t connection_timeout_ms_;

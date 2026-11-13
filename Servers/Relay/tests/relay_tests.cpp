@@ -8,6 +8,7 @@
 #include "records.h"
 #include "region_keys.h"
 #include "sessions.h"
+#include "vpn_check.h"
 #include "wire.h"
 
 #include <algorithm>
@@ -331,8 +332,282 @@ void TestAddressRateLimit() {
   EXPECT_TRUE(!limiter.Allow(TEST_ADDRESS, 60000));
 }
 
-void TestVpnHookAllowsEveryoneForNow() {
-  EXPECT_TRUE(relay::VpnCheckPasses(0x0A000001u));
+// VPN check (PROTOCOL.md 4.4 and 7.2). The data files are written to the working directory and removed at the end.
+const char *const VPN_RANGES_PATH = "relay_test_vpn_ranges.txt";
+const char *const VPN_OPERATORS_PATH = "relay_test_vpn_operators.txt";
+const char *const VPN_ALLOW_PATH = "relay_test_vpn_allow.txt";
+const char *const VPN_DB_PATH = "relay_test_vpn_operators.mmdb";
+
+std::uint32_t VpnAddress(unsigned a, unsigned b, unsigned c, unsigned d) {
+  return (a << 24) | (b << 16) | (c << 8) | d;
+}
+
+void WriteBytes(const std::string &path, const std::string &bytes) {
+  std::FILE *file = std::fopen(path.c_str(), "wb");
+  EXPECT_TRUE(file != nullptr);
+  if (file != nullptr) {
+    static_cast<void>(std::fwrite(bytes.data(), 1, bytes.size(), file));
+    static_cast<void>(std::fclose(file));
+  }
+}
+
+struct TestNetwork {
+  std::uint32_t m_address;
+  unsigned m_prefix;
+  std::uint32_t m_number;
+};
+
+enum class TestRecordKind : std::uint8_t { EMPTY, NODE, DATA };
+
+struct TestRecord {
+  TestRecordKind m_kind = TestRecordKind::EMPTY;
+  std::uint32_t m_value = 0; // Node index, data offset or autonomous system number, by kind.
+};
+
+struct TestNode {
+  TestRecord m_child[2];
+};
+
+// MaxMind DB control byte and size (the binary format of the MaxMind DB specification). Sizes here stay below 29.
+void AppendControl(std::string &out, unsigned type, std::size_t size) {
+  if (type <= 7) {
+    out.push_back(static_cast<char>((type << 5) | size));
+  } else {
+    out.push_back(static_cast<char>(size));
+    out.push_back(static_cast<char>(type - 7));
+  }
+}
+
+void AppendUnsigned(std::string &out, unsigned type, std::uint64_t value) {
+  std::size_t count = 0;
+  for (std::uint64_t rest = value; rest != 0; rest >>= 8) {
+    ++count;
+  }
+  AppendControl(out, type, count);
+  for (std::size_t i = count; i > 0; --i) {
+    out.push_back(static_cast<char>((value >> (8 * (i - 1))) & 0xFF));
+  }
+}
+
+void AppendString(std::string &out, const std::string &text) {
+  AppendControl(out, 2, text.size());
+  out += text;
+}
+
+// One data entry: a map with the key "autonomous_system_number" holding the number.
+void AppendNumberEntry(std::string &out, std::uint32_t number) {
+  AppendControl(out, 7, 1);
+  AppendString(out, "autonomous_system_number");
+  AppendUnsigned(out, 6, number);
+}
+
+// Writes a small IPv4 database in the MaxMind DB format, with record size 24, for the operator lookup. The networks
+// must not overlap.
+void WriteTestDatabase(const std::string &path, const std::vector<TestNetwork> &networks) {
+  std::vector<TestNode> nodes(1);
+  for (const TestNetwork &network : networks) {
+    std::size_t node = 0;
+    for (unsigned depth = 0; depth < network.m_prefix; ++depth) {
+      const unsigned BIT = (network.m_address >> (31 - depth)) & 1u;
+      if (depth + 1 == network.m_prefix) {
+        nodes.at(node).m_child[BIT].m_kind = TestRecordKind::DATA;
+        nodes.at(node).m_child[BIT].m_value = network.m_number;
+        break;
+      }
+      if (nodes.at(node).m_child[BIT].m_kind != TestRecordKind::NODE) {
+        nodes.at(node).m_child[BIT].m_kind = TestRecordKind::NODE;
+        nodes.at(node).m_child[BIT].m_value = static_cast<std::uint32_t>(nodes.size());
+        nodes.emplace_back();
+      }
+      node = nodes.at(node).m_child[BIT].m_value;
+    }
+  }
+
+  std::string data;
+  for (TestNode &node : nodes) {
+    for (TestRecord &record : node.m_child) {
+      if (record.m_kind == TestRecordKind::DATA) {
+        const std::uint32_t NUMBER = record.m_value;
+        record.m_value = static_cast<std::uint32_t>(data.size());
+        AppendNumberEntry(data, NUMBER);
+      }
+    }
+  }
+
+  const std::uint32_t NODE_COUNT = static_cast<std::uint32_t>(nodes.size());
+  std::string bytes;
+  for (const TestNode &node : nodes) {
+    for (const TestRecord &record : node.m_child) {
+      std::uint32_t value = NODE_COUNT;
+      if (record.m_kind == TestRecordKind::NODE) {
+        value = record.m_value;
+      } else if (record.m_kind == TestRecordKind::DATA) {
+        value = NODE_COUNT + 16 + record.m_value;
+      }
+      bytes.push_back(static_cast<char>((value >> 16) & 0xFF));
+      bytes.push_back(static_cast<char>((value >> 8) & 0xFF));
+      bytes.push_back(static_cast<char>(value & 0xFF));
+    }
+  }
+  bytes += std::string(16, '\0');
+  bytes += data;
+
+  bytes += "\xAB\xCD\xEF"
+           "MaxMind.com";
+  AppendControl(bytes, 7, 9);
+  AppendString(bytes, "binary_format_major_version");
+  AppendUnsigned(bytes, 5, 2);
+  AppendString(bytes, "binary_format_minor_version");
+  AppendUnsigned(bytes, 5, 0);
+  AppendString(bytes, "build_epoch");
+  AppendUnsigned(bytes, 9, 1700000000u);
+  AppendString(bytes, "database_type");
+  AppendString(bytes, "Relay test ASN");
+  AppendString(bytes, "description");
+  AppendControl(bytes, 7, 0);
+  AppendString(bytes, "ip_version");
+  AppendUnsigned(bytes, 5, 4);
+  AppendString(bytes, "languages");
+  AppendControl(bytes, 11, 0);
+  AppendString(bytes, "node_count");
+  AppendUnsigned(bytes, 6, NODE_COUNT);
+  AppendString(bytes, "record_size");
+  AppendUnsigned(bytes, 5, 24);
+
+  WriteBytes(path, bytes);
+}
+
+relay::VpnSettings MakeVpnTestSettings() {
+  relay::VpnSettings settings;
+  settings.enabled = true;
+  settings.ranges_path = VPN_RANGES_PATH;
+  settings.operators_path = VPN_OPERATORS_PATH;
+  settings.operator_db_path = VPN_DB_PATH;
+  settings.allow_path = VPN_ALLOW_PATH;
+  return settings;
+}
+
+// Writes a complete, valid set of VPN files. Blocked: 198.51.100.0/24 and 192.0.2.7, operator 64496. Allowed:
+// 198.51.100.10 and 203.0.113.9. The database maps 203.0.113.0/24 to 64496 and 203.0.114.0/24 to 64511.
+void WriteValidVpnFiles() {
+  WriteBytes(VPN_RANGES_PATH, "# Blocked networks\r\n198.51.100.77/24\r\n\r\n192.0.2.7\r\n");
+  WriteBytes(VPN_OPERATORS_PATH, "64496\r\n");
+  WriteBytes(VPN_ALLOW_PATH, "198.51.100.10\n203.0.113.9\n");
+  WriteTestDatabase(VPN_DB_PATH, {{VpnAddress(203, 0, 113, 0), 24, 64496}, {VpnAddress(203, 0, 114, 0), 24, 64511}});
+}
+
+void RemoveVpnTestFiles() {
+  static_cast<void>(std::remove(VPN_RANGES_PATH));
+  static_cast<void>(std::remove(VPN_OPERATORS_PATH));
+  static_cast<void>(std::remove(VPN_ALLOW_PATH));
+  static_cast<void>(std::remove(VPN_DB_PATH));
+}
+
+void TestVpnCheckVerdicts() {
+  WriteValidVpnFiles();
+  relay::VpnCheck vpn(MakeVpnTestSettings());
+  std::string error;
+  EXPECT_TRUE(vpn.Load(error));
+
+  // A range is written with host bits set; it covers the whole /24.
+  EXPECT_TRUE(vpn.Check(VpnAddress(198, 51, 100, 73)).reason == relay::VpnReason::LISTED_RANGE);
+  EXPECT_TRUE(vpn.Check(VpnAddress(198, 51, 101, 1)).reason == relay::VpnReason::NONE);
+  EXPECT_TRUE(vpn.Check(VpnAddress(192, 0, 2, 7)).reason == relay::VpnReason::LISTED_RANGE);
+  EXPECT_TRUE(vpn.Check(VpnAddress(192, 0, 2, 8)).reason == relay::VpnReason::NONE);
+
+  relay::VpnVerdict operator_verdict = vpn.Check(VpnAddress(203, 0, 113, 5));
+  EXPECT_TRUE(operator_verdict.reason == relay::VpnReason::LISTED_OPERATOR);
+  EXPECT_EQ(operator_verdict.operator_number, 64496u);
+  EXPECT_TRUE(vpn.Check(VpnAddress(203, 0, 114, 5)).reason == relay::VpnReason::NONE); // Operator 64511 is not listed.
+  EXPECT_TRUE(vpn.Check(VpnAddress(10, 0, 0, 1)).reason == relay::VpnReason::NONE);
+
+  // The allow list overrides the range list and the operator list.
+  EXPECT_TRUE(vpn.Check(VpnAddress(198, 51, 100, 10)).reason == relay::VpnReason::NONE);
+  EXPECT_TRUE(vpn.Check(VpnAddress(203, 0, 113, 9)).reason == relay::VpnReason::NONE);
+  EXPECT_TRUE(vpn.Check(VpnAddress(198, 51, 100, 11)).reason == relay::VpnReason::LISTED_RANGE);
+}
+
+void TestVpnReloadKeepsPreviousData() {
+  WriteValidVpnFiles();
+  relay::VpnCheck vpn(MakeVpnTestSettings());
+  std::string error;
+  EXPECT_TRUE(vpn.Load(error));
+
+  WriteBytes(VPN_RANGES_PATH, "300.1.1.1\n");
+  EXPECT_TRUE(!vpn.Load(error));
+  EXPECT_TRUE(!error.empty());
+  EXPECT_TRUE(vpn.Check(VpnAddress(198, 51, 100, 73)).reason == relay::VpnReason::LISTED_RANGE);
+
+  WriteBytes(VPN_RANGES_PATH, "10.0.0.0/8\n");
+  EXPECT_TRUE(vpn.Load(error));
+  EXPECT_TRUE(vpn.Check(VpnAddress(10, 1, 2, 3)).reason == relay::VpnReason::LISTED_RANGE);
+  EXPECT_TRUE(vpn.Check(VpnAddress(198, 51, 100, 73)).reason == relay::VpnReason::NONE);
+
+  // A missing file fails the reload and keeps the data in use.
+  static_cast<void>(std::remove(VPN_OPERATORS_PATH));
+  EXPECT_TRUE(!vpn.Load(error));
+  EXPECT_TRUE(vpn.Check(VpnAddress(10, 1, 2, 3)).reason == relay::VpnReason::LISTED_RANGE);
+}
+
+void TestVpnMissingAndInvalidFiles() {
+  WriteValidVpnFiles();
+  std::string error;
+  static_cast<void>(std::remove(VPN_ALLOW_PATH));
+  relay::VpnCheck missing_allow(MakeVpnTestSettings());
+  EXPECT_TRUE(!missing_allow.Load(error));
+
+  WriteValidVpnFiles();
+  static_cast<void>(std::remove(VPN_DB_PATH));
+  relay::VpnCheck missing_db(MakeVpnTestSettings());
+  EXPECT_TRUE(!missing_db.Load(error));
+
+  WriteBytes(VPN_DB_PATH, "this is not a MaxMind database");
+  relay::VpnCheck unreadable_db(MakeVpnTestSettings());
+  EXPECT_TRUE(!unreadable_db.Load(error));
+  WriteValidVpnFiles();
+
+  // Each line below is one entry that must be refused, so the whole file is refused.
+  const char *const BAD_NETWORKS[] = {"300.1.1.1",          "198.51.100",       "198.51.100.1/33",
+                                      "198.51.100.1/",      "198.51.100.1/x",   "01.2.3.4",
+                                      "198.51.100.1 extra", "198.51.100.1/123", "2001:db8::1"};
+  for (const char *bad : BAD_NETWORKS) {
+    WriteValidVpnFiles();
+    WriteBytes(VPN_RANGES_PATH, std::string(bad) + "\n");
+    relay::VpnCheck vpn(MakeVpnTestSettings());
+    EXPECT_TRUE(!vpn.Load(error));
+  }
+
+  const char *const BAD_OPERATORS[] = {"64496x", "-1", "4294967296", "AS64496"};
+  for (const char *bad : BAD_OPERATORS) {
+    WriteValidVpnFiles();
+    WriteBytes(VPN_OPERATORS_PATH, std::string(bad) + "\n");
+    relay::VpnCheck vpn(MakeVpnTestSettings());
+    EXPECT_TRUE(!vpn.Load(error));
+  }
+
+  WriteValidVpnFiles();
+  WriteBytes(VPN_RANGES_PATH, "");
+  relay::VpnCheck empty_lists(MakeVpnTestSettings());
+  EXPECT_TRUE(empty_lists.Load(error));
+  EXPECT_TRUE(empty_lists.Check(VpnAddress(192, 0, 2, 7)).reason == relay::VpnReason::NONE);
+}
+
+void TestVpnOffNeedsNoFiles() {
+  relay::VpnSettings settings = MakeVpnTestSettings();
+  settings.enabled = false;
+  static_cast<void>(std::remove(VPN_RANGES_PATH));
+  static_cast<void>(std::remove(VPN_DB_PATH));
+  relay::VpnCheck vpn(settings);
+  std::string error;
+  EXPECT_TRUE(vpn.Load(error));
+  EXPECT_TRUE(vpn.Check(VpnAddress(192, 0, 2, 7)).reason == relay::VpnReason::NONE);
+}
+
+void TestVpnReloadRequestAndLogAddress() {
+  relay::RequestVpnReload();
+  EXPECT_TRUE(relay::TakeVpnReloadRequest());
+  EXPECT_TRUE(!relay::TakeVpnReloadRequest());
+  EXPECT_TRUE(relay::ShortAddress(VpnAddress(203, 0, 113, 5)) == std::string("203.0.113.x"));
 }
 
 void TestIssuePass(const relay::RegionKey &key) {
@@ -1954,7 +2229,11 @@ int RunTests() {
   TestPingRoundSchedule();
   TestMedianWithFewAnswers();
   TestAddressRateLimit();
-  TestVpnHookAllowsEveryoneForNow();
+  TestVpnCheckVerdicts();
+  TestVpnReloadKeepsPreviousData();
+  TestVpnMissingAndInvalidFiles();
+  TestVpnOffNeedsNoFiles();
+  TestVpnReloadRequestAndLogAddress();
   TestIssuePass(key);
   TestRateLimiter();
   TestCreateValidation(key);
@@ -1975,6 +2254,7 @@ int RunTests() {
   static_cast<void>(std::remove(key_path.c_str()));
   static_cast<void>(std::remove((key_path + ".pub").c_str()));
   static_cast<void>(std::remove(corrupt_path.c_str()));
+  RemoveVpnTestFiles();
 
   if (g_failures != 0) {
     static_cast<void>(std::fprintf(stderr, "%d check(s) failed\n", g_failures));

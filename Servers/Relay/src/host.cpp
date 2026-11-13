@@ -4,6 +4,7 @@
 #include "log.h"
 #include "pass.h"
 #include "protocol.h"
+#include "vpn_check.h"
 #include "wire.h"
 
 #include <algorithm>
@@ -70,6 +71,16 @@ void SendMessage(ENetPeer *peer, const unsigned char *data, std::size_t length) 
   }
 }
 
+// Logs a VPN refusal with its reason. The address is shortened, so the log never holds a full address.
+void LogVpnRefusal(std::uint32_t connection_id, std::uint32_t address, const VpnVerdict &verdict) {
+  if (verdict.reason == VpnReason::LISTED_OPERATOR) {
+    LogLine("connection %u: VPN check refused %s, listed network operator %u", connection_id,
+            ShortAddress(address).c_str(), static_cast<unsigned int>(verdict.operator_number));
+  } else {
+    LogLine("connection %u: VPN check refused %s, listed network range", connection_id, ShortAddress(address).c_str());
+  }
+}
+
 // Settings of the session manager. It checks passes with the public half of the region key held in settings.
 SessionSettings MakeSessionSettings(const EntryCheckSettings &settings, bool check_address, std::size_t max_sessions,
                                     const RecordSettings &records, const DropSettings &drop) {
@@ -99,9 +110,9 @@ struct RelayHost::Connection {
   std::uint32_t m_last_heard_ms = 0; // When ENet last received anything from the peer, seen at the last service pass.
 };
 
-RelayHost::RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings, bool check_address,
+RelayHost::RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings, VpnCheck &vpn, bool check_address,
                      std::size_t max_sessions, const RecordSettings &records, const DropSettings &drop)
-    : listen_port_(listen_port), next_connection_id_(1), host_(nullptr), settings_(settings),
+    : listen_port_(listen_port), next_connection_id_(1), host_(nullptr), settings_(settings), vpn_(vpn),
       rate_limiter_(ENTRY_CHECKS_PER_WINDOW, RATE_WINDOW_MS), session_limit_(max_sessions),
       connection_timeout_ms_(drop.m_connection_timeout_ms),
       sessions_(MakeSessionSettings(settings_, check_address, max_sessions, records, drop), *this) {}
@@ -156,6 +167,7 @@ bool RelayHost::Run() {
     }
     NoteReceiveTimes();
     CheckFirstMessageDeadlines();
+    ReloadVpnDataIfRequested();
     ServiceEntryChecks();
     sessions_.Tick(enet_time_get());
   }
@@ -340,6 +352,19 @@ void RelayHost::CheckFirstMessageDeadlines() {
   }
 }
 
+// Reloads the VPN data after a Ctrl+Break (see main.cpp). A failed reload keeps the data already in use.
+void RelayHost::ReloadVpnDataIfRequested() {
+  if (!TakeVpnReloadRequest()) {
+    return;
+  }
+  std::string error;
+  if (vpn_.Load(error)) {
+    LogLine("VPN data reloaded");
+  } else {
+    LogError("relay: VPN data not reloaded, the data in use is kept: %s", error.c_str());
+  }
+}
+
 // CHECK_HELLO body: u16 proto, u32 exe_crc, u32 ini_crc. The checks run in this order: protocol version, rate limit,
 // VPN check, then the ping measurement.
 void RelayHost::OnCheckHello(ENetPeer *peer, Connection *connection, const unsigned char *data) {
@@ -358,8 +383,9 @@ void RelayHost::OnCheckHello(ENetPeer *peer, Connection *connection, const unsig
     RefuseAndClose(peer, connection, REFUSE_RATE_LIMITED, 0, 0);
     return;
   }
-  if (!VpnCheckPasses(address)) {
-    LogLine("connection %u: address flagged by the VPN check, refused", connection->m_id);
+  const VpnVerdict VERDICT = vpn_.Check(address);
+  if (VERDICT.reason != VpnReason::NONE) {
+    LogVpnRefusal(connection->m_id, address, VERDICT);
     RefuseAndClose(peer, connection, REFUSE_VPN_DETECTED, 0, 0);
     return;
   }

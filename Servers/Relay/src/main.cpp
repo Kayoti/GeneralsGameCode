@@ -8,21 +8,43 @@
 // --strict-command-count makes a FRAMEINFO command count mismatch a refused record (PROTOCOL.md 4.6, after V7).
 // --log-violations logs every refused match record with its type, frame and next_frame.
 // --generate-key writes a new region key pair and exits.
+// With the VPN check on, Ctrl+Break reloads its data files without a restart (PROTOCOL.md 4.4 and 7.2).
 
 #include "config.h"
 #include "entry_check.h"
 #include "host.h"
 #include "log.h"
 #include "region_keys.h"
+#include "vpn_check.h"
 
 #include <cstdio>
 #include <enet/enet.h>
 #include <sodium.h>
 #include <string>
+#include <windows.h>
 
 namespace {
 
 const char *const DEFAULT_CONFIG_PATH = "relay.conf";
+
+// Ctrl+Break asks for a VPN data reload. Other console events keep their default behaviour.
+BOOL WINAPI OnConsoleControl(DWORD event) {
+  if (event != CTRL_BREAK_EVENT) {
+    return FALSE;
+  }
+  relay::RequestVpnReload();
+  return TRUE;
+}
+
+relay::VpnSettings MakeVpnSettings(const relay::RelayConfig &config) {
+  relay::VpnSettings settings;
+  settings.enabled = config.vpn_check;
+  settings.ranges_path = config.vpn_ranges;
+  settings.operators_path = config.vpn_operators;
+  settings.operator_db_path = config.vpn_operator_db;
+  settings.allow_path = config.vpn_allow;
+  return settings;
+}
 
 void PrintUsage() {
   relay::LogError("usage: relay [config-file] [--no-address-check] [--strict-command-count] [--log-violations]");
@@ -120,9 +142,24 @@ int RunRelay(int argc, char **argv) {
   drop_settings.m_stall_ms = static_cast<std::uint32_t>(config.stall_time_s) * 1000;
   drop_settings.m_connection_timeout_ms = static_cast<std::uint32_t>(config.connection_timeout_s) * 1000;
 
+  // The VPN data must be complete before the relay accepts anyone. A missing or invalid file stops the relay here.
+  relay::VpnCheck vpn(MakeVpnSettings(config));
+  if (!vpn.Load(error)) {
+    relay::LogError("relay: VPN check: %s", error.c_str());
+    return 1;
+  }
+  if (config.vpn_check) {
+    relay::LogLine("VPN check on, its data loaded. Ctrl+Break reloads the data.");
+    if (!SetConsoleCtrlHandler(OnConsoleControl, TRUE)) {
+      relay::LogError("relay: Ctrl+Break reload could not be set up, the VPN data is not reloadable");
+    }
+  } else {
+    relay::LogLine("VPN check off");
+  }
+
   int exit_code = 0;
   {
-    relay::RelayHost host(config.listen_port, entry_settings, options.m_check_address, config.max_sessions,
+    relay::RelayHost host(config.listen_port, entry_settings, vpn, options.m_check_address, config.max_sessions,
                           options.m_records, drop_settings);
     if (!host.Start(error)) {
       relay::LogError("relay: %s", error.c_str());
