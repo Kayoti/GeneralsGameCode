@@ -42,7 +42,7 @@ D1
 - [ ] After a Servers match the score screen does not report the match to the tag address and does not store the tag as the last ladder used. Code written and built, not run: `ScoreScreen.cpp`, both spots.
 - [ ] This settles PROTOCOL.md V4. If the lobby service does not carry the ladder fields, the fallback (a fixed prefix in the lobby name, stripped for display) is implemented instead and the handoff notes say so. Not settled: needs the live lobby service. Fallback not implemented.
 - [x] Builds with the switch on and off. Lint reports no new warnings. Release builds exit 0 on and off; clang-tidy script: 0 issues on the 8 changed files.
-- [ ] Reviewed by someone other than the author, with a dedicated pass confirming Online behaviour is unchanged.
+- [x] Reviewed by someone other than the author, with a dedicated pass confirming Online behaviour is unchanged.
 
 ## Out of scope
 
@@ -68,4 +68,9 @@ The entry check on join (D3). Match start (2.1).
   - The Online filter depends on `regions.txt` being found in the working directory (see D1 notes). Without it, tagged lobbies are not hidden in Online. The tag is only ever created when the file was already read by the entry check.
   - Building: the OFF build first failed on a lost network connection while fetching a dependency; a plain retry worked. Builds: switch on 2539 steps exit 0, switch off 2525 steps exit 0 (Release). Lint: `scripts/run-clang-tidy.py --no-plugin` on the 8 changed `.cpp` files, 0 issues (switch-on PCH-free build in `C:\cnc-build\D2-tidy`).
   - PROTOCOL.md section 10: V4 stays open (see above).
-- Review findings and fixes:
+- Review findings and fixes: reviewed by a second developer, with a dedicated pass on unchanged Online behaviour. Verdict: approved, no changes required. Both findings are low.
+  - The tag-region list is allocated once on first use and never freed, matching the existing region-list pattern in the same file. Benign one-time static, no correctness effect.
+  - In Servers mode the lobby list's "Ladder" column still reads "Unknown Ladder" for tagged lobbies. Cosmetic and out of scope.
+  - V4 (section 10) judged sound: `PeerThread.cpp` already sends and reads the ladder address fields for every lobby and is untouched, so the tag carried in those fields (D33) survives on the client side; the untested-prefix fallback is correctly not built. The only part that needs the live lobby service is whether the third-party service relays the custom ladder keys to other players.
+  - Confirmed correct by a full switch-on build (2539 steps, both titles link) and a switch-off configure: with the switch off, and in Online with the switch on, the lobby list, create dialog, join, ladder choice and score screen behave as upstream (every new path is behind the switch and a Servers-mode check, and the score-screen guards use an `#else` with the original condition); the tag is formed from the region tag text and port in the ladder fields and compared by text and port together; from Servers the list shows only the player's own-region tag and from Online every tagged lobby is hidden; the unknown-ladder refusal is skipped only for the own tag; all join paths are covered; scope stays within track D (PeerThread, LadderDefs, NAT and StagingRoomGameInfo untouched); Zero Hour and Generals are byte-identical.
+  - On-screen and live-service behaviour (the filtered list, the tag round-trip through the lobby service, the hidden controls, the score-screen report) needs the running game and a lobby service, which are not available here. These are the Phase 1 D gate and are recorded as pending: needs the game installed.
