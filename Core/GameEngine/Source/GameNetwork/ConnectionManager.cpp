@@ -1609,14 +1609,22 @@ void ConnectionManager::processServerRecord(const UnsignedByte *data, UnsignedIn
 		return;
 	}
 
+	// FRAMEINFO is frame accounting, not a command to execute: it sets the sender's expected command
+	// count for the frame and is never added to the frame data. processNetCommand handles it the same
+	// way in the normal path (processFrameInfo, then it clears the local relay bit so sendRemoteCommand
+	// does not add it). Without this a remote slot's frame command count would stay unset and
+	// allCommandsReady would never become ready for that slot.
+	if (type == NETCOMMANDTYPE_FRAMEINFO) {
+		processFrameInfo((NetFrameCommandMsg *)msg);
+		deleteInstance(ref);
+		return;
+	}
+
 	if (IsCommandSynchronized(type)) {
 		// GAMECOMMAND, PLAYERLEAVE and RUNAHEAD wait in the sender's frame data for their frame.
 		m_frameData[playerID]->addNetCommandMsg(msg);
 	} else {
 		switch (type) {
-			case NETCOMMANDTYPE_FRAMEINFO:
-				processFrameInfo((NetFrameCommandMsg *)msg);
-				break;
 			case NETCOMMANDTYPE_RUNAHEADMETRICS:
 				processRunAheadMetrics((NetRunAheadMetricsCommandMsg *)msg);
 				break;

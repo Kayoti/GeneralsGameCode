@@ -75,4 +75,12 @@ The server clock (S2). Starting a match from the staging room (2.1).
   - `clearGameData()` is called directly from `updateServerMode` on relay loss, mirroring `LANAPICallbacks.cpp` which calls it the same way during an update. The function returns immediately afterwards and touches no members.
   - The over-size (>4096) rule drops the command entirely (no local execution, no send, no count). For a `GAMECOMMAND` this means the local action is lost, but identically on every client, so the lockstep stays consistent. Engine game commands are far below 4096 and `WRAPPER` fragmentation is not used in server mode (D30/D32), so this is not expected to fire in practice.
 - Review findings and fixes:
-  - (none yet - awaiting the required review by someone other than the author)
+  - HIGH (simulation integrity), fixed: in `processServerRecord` a received `FRAMEINFO` fell into the
+    `IsCommandSynchronized` branch (`IsCommandSynchronized` returns TRUE for `FRAMEINFO`), so it was added
+    to the sender's frame data and `processFrameInfo` was never called (dead `case` in the else-switch).
+    The sender's `m_frameCommandCount` stayed -1 while `m_commandCount` grew, so
+    `FrameData::allCommandsReady` (ready when `m_frameCommandCount == m_commandCount`) never became ready
+    and the match stalled around frame 30. Fix: special-case `FRAMEINFO` before the `IsCommandSynchronized`
+    branch to call `processFrameInfo` and return without adding it to the frame data, mirroring the normal
+    `processNetCommand` path (which processes the FRAMEINFO and clears the local relay bit so
+    `sendRemoteCommand` does not add it); removed the now-dead `FRAMEINFO` case from the else-switch.
