@@ -540,6 +540,7 @@ set(GAMEENGINE_SRC
     Include/GameNetwork/GameSpy/PersistentStorageDefs.h
     Include/GameNetwork/GameSpy/PersistentStorageThread.h
     Include/GameNetwork/GameSpy/PingThread.h
+    Include/GameNetwork/GameSpy/ServersMode.h
     Include/GameNetwork/GameSpy/StagingRoomGameInfo.h
     Include/GameNetwork/GameSpy/ThreadUtils.h
 #    Include/GameNetwork/GameSpyChat.h # unused
@@ -1147,6 +1148,7 @@ set(GAMEENGINE_SRC
     Source/GameNetwork/GameSpy/LobbyUtils.cpp
     Source/GameNetwork/GameSpy/MainMenuUtils.cpp
     Source/GameNetwork/GameSpy/PeerDefs.cpp
+    Source/GameNetwork/GameSpy/ServersMode.cpp
     Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp
     Source/GameNetwork/GameSpy/Thread/BuddyThread.cpp
     Source/GameNetwork/GameSpy/Thread/GameResultsThread.cpp

@@ -71,6 +71,10 @@
 
 #include "GameNetwork/DownloadManager.h"
 #include "GameNetwork/GameSpy/MainMenuUtils.h"
+#ifdef RTS_SERVERS
+#include "GameClient/GadgetPushButton.h"
+#include "GameNetwork/GameSpy/ServersMode.h"
+#endif
 
 #include "GameClient/InGameUI.h"
 
@@ -106,6 +110,9 @@ static NameKeyType mainMenuID = NAMEKEY_INVALID;
 static NameKeyType skirmishID = NAMEKEY_INVALID;
 static NameKeyType onlineID = NAMEKEY_INVALID;
 static NameKeyType networkID = NAMEKEY_INVALID;
+#ifdef RTS_SERVERS
+static NameKeyType serversID = NAMEKEY_INVALID;
+#endif
 static NameKeyType optionsID = NAMEKEY_INVALID;
 static NameKeyType exitID = NAMEKEY_INVALID;
 static NameKeyType motdID = NAMEKEY_INVALID;
@@ -144,6 +151,9 @@ static GameWindow *buttonMultiPlayer = nullptr;
 static GameWindow *buttonSkirmish = nullptr;
 static GameWindow *buttonOnline = nullptr;
 static GameWindow *buttonNetwork = nullptr;
+#ifdef RTS_SERVERS
+static GameWindow *buttonServers = nullptr;
+#endif
 static GameWindow *buttonOptions = nullptr;
 static GameWindow *buttonExit = nullptr;
 static GameWindow *buttonMOTD = nullptr;
@@ -217,6 +227,10 @@ void HandleCanceledDownload( Bool resetDropDown )
 	buttonPushed = FALSE;
 	if (resetDropDown)
 	{
+#ifdef RTS_SERVERS
+		// TheSuperHackers @feature Kayoti 13/11/2026 Leaves Servers mode when the player is returned to the main menu.
+		ServersModeClear();
+#endif
 		dropDownWindows[DROPDOWN_MAIN]->winHide(FALSE);
 		TheTransitionHandler->setGroup("MainMenuDefaultMenuLogoFade");
 	}
@@ -426,6 +440,84 @@ static void initLabelVersion()
 	}
 }
 
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 13/11/2026 Adds the Servers button below the Network button of the Multiplayer menu.
+// The button copies the look of the Network button, so the menu layout file is not changed.
+static void initServersButton()
+{
+	serversID = TheNameKeyGenerator->nameToKey( "MainMenu.wnd:ButtonServers" );
+	buttonServers = TheWindowManager->winGetWindowFromId( parentMainMenu, serversID );
+	if( buttonServers || !buttonOnline || !buttonNetwork )
+		return;
+
+	GameWindow *parent = buttonNetwork->winGetParent();
+	if( !parent )
+		return;
+
+	Int x, y, width, height, onlineX, onlineY;
+	buttonNetwork->winGetPosition( &x, &y );
+	buttonNetwork->winGetSize( &width, &height );
+	buttonOnline->winGetPosition( &onlineX, &onlineY );
+
+	// The new button goes one button step below the lower of Online and Network
+	const Int lowest = (y > onlineY) ? y : onlineY;
+	Int step = (y > onlineY) ? (y - onlineY) : (onlineY - y);
+	if( step == 0 )
+		step = height;
+
+	// Make room: whatever sits below moves down, and the frame grows with it
+	for( GameWindow *child = parent->winGetChild(); child; child = child->winGetNext() )
+	{
+		Int childX, childY;
+		child->winGetPosition( &childX, &childY );
+		if( childY > lowest )
+			child->winSetPosition( childX, childY + step );
+	}
+	Int parentWidth, parentHeight;
+	parent->winGetSize( &parentWidth, &parentHeight );
+	parent->winSetSize( parentWidth, parentHeight + step );
+
+	WinInstanceData *src = buttonNetwork->winGetInstanceData();
+	WinInstanceData instData;
+	instData.m_style = src->getStyle();
+	buttonServers = TheWindowManager->gogoGadgetPushButton( parent, buttonNetwork->winGetStatus() & ~WIN_STATUS_HIDDEN,
+																													x, lowest + step, width, height,
+																													&instData, buttonNetwork->winGetFont(), FALSE );
+	if( !buttonServers )
+		return;
+
+	buttonServers->winSetWindowId( serversID );
+	buttonServers->winSetOwner( buttonNetwork->winGetOwner() );
+
+	WinInstanceData *dst = buttonServers->winGetInstanceData();
+	for( Int i = 0; i < MAX_DRAW_DATA; ++i )
+	{
+		dst->m_enabledDrawData[i] = src->m_enabledDrawData[i];
+		dst->m_disabledDrawData[i] = src->m_disabledDrawData[i];
+		dst->m_hiliteDrawData[i] = src->m_hiliteDrawData[i];
+	}
+	dst->m_enabledText = src->m_enabledText;
+	dst->m_disabledText = src->m_disabledText;
+	dst->m_hiliteText = src->m_hiliteText;
+	dst->m_imeCompositeText = src->m_imeCompositeText;
+	dst->m_imageOffset = src->m_imageOffset;
+
+	GadgetButtonSetText( buttonServers, TheGameText->fetch( "GUI:Servers" ) );
+}
+
+// TheSuperHackers @feature Kayoti 13/11/2026 Opens the online login the same way the Online button does, once the entry check has passed.
+static void startServersOnline()
+{
+	dontAllowTransitions = TRUE;
+	buttonPushed = TRUE;
+	dropDownWindows[DROPDOWN_MULTIPLAYER]->winHide(FALSE);
+	TheTransitionHandler->reverse("MainMenuMultiPlayerMenuTransitionToNext");
+
+	StartPatchCheck();
+	dropDown = DROPDOWN_NONE;
+}
+#endif // RTS_SERVERS
+
 //-------------------------------------------------------------------------------------------------
 /** Initialize the main menu */
 //-------------------------------------------------------------------------------------------------
@@ -524,6 +616,12 @@ void MainMenuInit( WindowLayout *layout, void *userData )
 	dropDownWindows[DROPDOWN_DIFFICULTY] = TheWindowManager->winGetWindowFromId( parentMainMenu, TheNameKeyGenerator->nameToKey( "MainMenu.wnd:MapBorder4" ) );
 	for(i = 1; i < DROPDOWN_COUNT; ++i)
 		dropDownWindows[i]->winHide(TRUE);
+
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 Leaves Servers mode whenever the main menu is shown, and adds the Servers button.
+	ServersModeClear();
+	initServersButton();
+#endif
 
 	initialHide();
 
@@ -649,6 +747,9 @@ void MainMenuShutdown( WindowLayout *layout, void *userData )
 		isShuttingDown = TRUE;
 
 	CancelPatchCheckCallback();
+#ifdef RTS_SERVERS
+	ServersEntryCancel();
+#endif
 
 	// if we are shutting down for an immediate pop, skip the animations
 	Bool popImmediate = *(Bool *)userData;
@@ -789,6 +890,11 @@ void MainMenuUpdate( WindowLayout *layout, void *userData )
 	{
 		return;
 	}
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 The entry check is updated every frame, because the relay times its ping from its own clock.
+	if( ServersEntryUpdate() == SERVERS_ENTRY_PASSED )
+		startServersOnline();
+#endif
 	if(DontShowMainMenu && justEntered)
 		justEntered = FALSE;
 
@@ -1426,6 +1532,14 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 				dropDown = DROPDOWN_NONE;
 
 			}
+#ifdef RTS_SERVERS
+			else if( controlID == serversID )
+			{
+				if(dontAllowTransitions)
+					break;
+				ServersEntryStart();
+			}
+#endif
 			else if( controlID == networkID )
 			{
 				if(dontAllowTransitions)
