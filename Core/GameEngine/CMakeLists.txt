@@ -1215,6 +1215,37 @@ target_link_libraries(corei_gameengine_public INTERFACE
     stlport
 )
 
+# Servers mode: the relay link is its own library, built without the engine's precompiled header
+# and forced includes, so that ENet's winsock2.h does not meet the engine's windows.h.
+# Only the new headers of this library expose its API. ENet headers are used inside its sources only.
+if(RTS_BUILD_OPTION_SERVERS)
+    add_library(core_serverlink STATIC)
+
+    target_sources(core_serverlink PRIVATE
+        Include/GameNetwork/ServerEntryCheck.h
+        Include/GameNetwork/ServerLink.h
+        Include/GameNetwork/ServerRegions.h
+        Source/GameNetwork/ServerEntryCheck.cpp
+        Source/GameNetwork/ServerLink.cpp
+        Source/GameNetwork/ServerRegions.cpp
+    )
+
+    target_include_directories(core_serverlink PRIVATE
+        Include
+        ${enet_SOURCE_DIR}/include
+    )
+
+    target_compile_definitions(core_serverlink PUBLIC RTS_SERVERS)
+
+    target_link_libraries(core_serverlink PRIVATE
+        enet
+        ws2_32
+        winmm
+    )
+
+    target_link_libraries(corei_gameengine_public INTERFACE core_serverlink)
+endif()
+
 # ReactOS ATL for MinGW-w64 only (MSVC uses native ATL)
 if(MINGW)
     target_link_libraries(corei_gameengine_public INTERFACE reactos_atl)
