@@ -1,6 +1,6 @@
 # A3 Relay: VPN check in the entry check
 
-State: partial
+State: done
 Branch: servers-A3
 
 ## Goal
@@ -28,13 +28,13 @@ Anything outside `Servers/Relay/`.
 
 - [x] Three checks, each switchable in configuration: the address is inside a listed network range; the address belongs to a listed network operator number; the address is on an allow list, which overrides the other two.
 - [x] Range lists are plain text files, one network per line. Operator lookup uses a free address-to-operator database read with libmaxminddb.
-- [ ] All data is loaded into memory at start. A lookup does no file or network access.
+- [x] All data is loaded into memory at start. A lookup does no file or network access. The range, operator and allow lists are built once into vectors at start. The operator database uses libmaxminddb's memory mapping (`MMDB_MODE_MMAP`), the library's standard mode (libmaxminddb is mandated by D31); every page is touched once at start so the mapping is resident, and no file is opened per lookup. The reviewer judged this meets "in memory"; a heap copy would depend on the library's internal pointers and is not recommended. Locking the pages is a possible later hardening.
 - [x] Data is reloaded without a restart on a signal or a configured interval, and a failed reload keeps the previous data.
 - [x] A flagged address gets `REFUSE` `VPN_DETECTED` before any ping measurement.
 - [x] Starting with missing data files is an error unless the check is switched off.
 - [x] The relay logs each refusal with the reason and a shortened address.
 - [x] The file formats and where to obtain the free data are documented in `Servers/Relay/README.md`.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -74,4 +74,9 @@ Detecting residential VPNs. Any check inside the game client.
   7. The libmaxminddb CMake prints "Perl not found. Unable to generate man pages". This does not affect the build.
   8. The example `relay.conf` names `data/` files that are not in the repository. With `vpn_check = on` the relay does not start until they exist, as the package requires.
   9. The helper process used for the Ctrl+Break test received the same console event and exited with a Ctrl+C status. The relay was not affected.
-- Review findings and fixes: none yet.
+- Review findings and fixes: reviewed by a second developer. Verdict: approved, no changes required. All findings are low.
+  - The memory-mapped operator database is acceptable, not a violation: libmaxminddb (mandated by D31) only offers memory-mapped mode, no file is opened per lookup, and the relay touches every page at start. A heap copy would be fragile. Recorded above against the in-memory item.
+  - A Ctrl+Break reload reads the lists and touches the database on the network loop thread, so the loop stalls for the length of the load. A reload is a rare operator action, so this is acceptable for now; a later fix loads on a worker thread and swaps the pointer.
+  - Follow-ups for the deployment phase (non-blocking, no data is committed now): add `data/` and `*.mmdb` to `Servers/Relay/.gitignore` so licensed MaxMind data is never committed; and add three README notes — that an empty operator list still needs the database file to exist, that IPv6 lines in a range list must be stripped (IPv6 is not supported), and that a mapped `.mmdb` cannot be replaced on Windows while the relay runs.
+  - Confirmed correct: the three checks and the allow-list override; defensive parsing of every data file (bounded lines, IPv4 validation rejecting leading zeros and out-of-range parts, prefix 0 to 32, operator numbers capped); the lookup address comes from the connection, never a packet; only a shortened address is logged; the check runs only in Servers mode, before the ping, and replaces A2's placeholder hook; a missing data file stops start unless the check is off; scope is `Servers/Relay/` only. Relay builds `/W4 /WX` clean and tests pass.
+  - Still to confirm with the game/data installed: one smoke test against a real GeoLite2-ASN file (the `autonomous_system_number` field and the IPv6-typed database path were exercised only against a generated database offline).
