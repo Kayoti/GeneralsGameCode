@@ -1,6 +1,7 @@
 // Unit tests for the relay's configuration, key and pass code. Built only with RELAY_BUILD_TESTS=ON.
 
 #include "config.h"
+#include "entry_check.h"
 #include "pass.h"
 #include "protocol.h"
 #include "region_keys.h"
@@ -236,6 +237,129 @@ void TestProtocolSizes() {
   EXPECT_EQ(relay::CREATE_BODY_SIZE, 104u);
   EXPECT_EQ(relay::JOIN_BODY_SIZE, 119u);
   EXPECT_EQ(relay::CHECK_HELLO_BODY_SIZE, 10u);
+  EXPECT_EQ(relay::REFUSE_BODY_SIZE, 5u);
+}
+
+// Runs one ping measurement that starts just before the 32-bit clock wraps. Ping i is sent at 250 ms * i and
+// answered after rtts[i] ms. A value of 0 means no answer.
+relay::EntryVerdict RunMeasurement(const std::uint32_t *rtts, std::uint16_t limit_ms, std::uint16_t &median_ms) {
+  const std::uint32_t START_MS = 0xFFFFFF00u;
+  relay::PingRound round;
+  round.Start(START_MS);
+  for (std::size_t i = 0; i < relay::PING_COUNT; ++i) {
+    std::uint32_t sent = START_MS + (static_cast<std::uint32_t>(i) * relay::PING_INTERVAL_MS);
+    EXPECT_TRUE(round.PingDue(sent));
+    round.SentPing(100 + i, sent);
+    if (rtts[i] != 0) {
+      EXPECT_TRUE(round.OnPong(100 + i, sent + rtts[i]));
+    }
+  }
+  return round.Verdict(limit_ms, median_ms);
+}
+
+void TestPingRoundVerdicts() {
+  const std::uint32_t ALL_ANSWERS[relay::PING_COUNT] = {10, 20, 30, 40, 50, 60, 70, 80};
+  std::uint16_t median = 0;
+  EXPECT_TRUE(RunMeasurement(ALL_ANSWERS, 150, median) == relay::EntryVerdict::PASS);
+  EXPECT_EQ(median, 45); // Even count: average of the two middle values.
+
+  const std::uint32_t MIXED_ANSWERS[relay::PING_COUNT] = {100, 0, 300, 0, 200, 400, 0, 500};
+  EXPECT_TRUE(RunMeasurement(MIXED_ANSWERS, 150, median) == relay::EntryVerdict::PING_TOO_HIGH);
+  EXPECT_EQ(median, 300);
+  EXPECT_TRUE(RunMeasurement(MIXED_ANSWERS, 300, median) == relay::EntryVerdict::PASS); // Equal to the limit passes.
+  EXPECT_EQ(median, 300);
+
+  const std::uint32_t FOUR_ANSWERS[relay::PING_COUNT] = {10, 10, 10, 10, 0, 0, 0, 0};
+  EXPECT_TRUE(RunMeasurement(FOUR_ANSWERS, 150, median) == relay::EntryVerdict::TIMEOUT);
+}
+
+void TestPingRoundRejectsBadPongs() {
+  relay::PingRound round;
+  round.Start(0);
+  round.SentPing(7, 0);
+  EXPECT_TRUE(!round.OnPong(8, 10)); // Unknown nonce.
+  EXPECT_TRUE(round.OnPong(7, 10));
+  EXPECT_TRUE(!round.OnPong(7, 20)); // Already answered.
+
+  relay::PingRound late;
+  late.Start(0);
+  late.SentPing(9, 0);
+  EXPECT_TRUE(!late.OnPong(9, relay::ANSWER_WINDOW_MS)); // Arrives when the window has closed.
+  EXPECT_TRUE(late.Expired(relay::ANSWER_WINDOW_MS));
+  EXPECT_TRUE(!late.Expired(relay::ANSWER_WINDOW_MS - 1));
+}
+
+void TestPingRoundSchedule() {
+  relay::PingRound round;
+  round.Start(1000);
+  EXPECT_TRUE(round.PingDue(1000));
+  round.SentPing(1, 1000);
+  EXPECT_TRUE(!round.PingDue(1249));
+  EXPECT_TRUE(round.PingDue(1250));
+  EXPECT_EQ(round.MsUntilNextAction(1100), 150u);
+  EXPECT_EQ(round.MsUntilNextAction(1300), 0u);
+  for (std::uint32_t i = 1; i < relay::PING_COUNT; ++i) {
+    round.SentPing(i + 1, 1000 + (i * relay::PING_INTERVAL_MS));
+  }
+  EXPECT_TRUE(!round.PingDue(1000 + 10000));
+  EXPECT_EQ(round.MsUntilNextAction(1000 + 1750), 2250u);
+}
+
+void TestMedianWithFewAnswers() {
+  const std::uint32_t FIVE_ANSWERS[relay::PING_COUNT] = {1, 2, 3, 4, 5, 0, 0, 0};
+  std::uint16_t median = 0;
+  EXPECT_TRUE(RunMeasurement(FIVE_ANSWERS, 150, median) == relay::EntryVerdict::PASS);
+  EXPECT_EQ(median, 3);
+}
+
+void TestAddressRateLimit() {
+  relay::AddressRateLimiter limiter;
+  const std::uint32_t TEST_ADDRESS = 0x0A000001u;
+  for (std::uint32_t i = 0; i < 6; ++i) {
+    EXPECT_TRUE(limiter.Allow(TEST_ADDRESS, i));
+  }
+  EXPECT_TRUE(!limiter.Allow(TEST_ADDRESS, 6));
+  EXPECT_TRUE(!limiter.Allow(TEST_ADDRESS, 59999));
+  EXPECT_TRUE(limiter.Allow(0x0A000002u, 6));      // Another address is not affected.
+  EXPECT_TRUE(limiter.Allow(TEST_ADDRESS, 60000)); // The check at time 0 has left the window.
+  EXPECT_TRUE(!limiter.Allow(TEST_ADDRESS, 60000));
+}
+
+void TestVpnHookAllowsEveryoneForNow() {
+  EXPECT_TRUE(relay::VpnCheckPasses(0x0A000001u));
+}
+
+void TestIssuePass(const relay::RegionKey &key) {
+  relay::EntryCheckSettings settings;
+  settings.region = 1;
+  settings.ping_limit_ms = 150;
+  settings.key = key;
+
+  relay::PassFields fields;
+  fields.client_ip = 0x0A000001u;
+  fields.exe_crc = 0x11111111u;
+  fields.ini_crc = 0x22222222u;
+  fields.rtt_ms = 42;
+  unsigned char pass[relay::PASS_SIZE] = {};
+  EXPECT_TRUE(relay::IssuePass(settings, fields, 1000, pass));
+
+  relay::PassCheckContext context;
+  context.public_key = key.public_key;
+  context.region = 1;
+  context.source_ip = 0x0A000001u;
+  context.check_address = true;
+  context.now = 1000;
+  relay::PassFields decoded;
+  relay::RefuseCode refuse = relay::REFUSE_BAD_PASS;
+  EXPECT_TRUE(relay::CheckPass(pass, relay::PASS_SIZE, context, decoded, refuse));
+  EXPECT_EQ(decoded.region, 1);
+  EXPECT_EQ(decoded.rtt_ms, 42);
+  EXPECT_EQ(decoded.client_ip, 0x0A000001u);
+  EXPECT_EQ(decoded.exe_crc, 0x11111111u);
+  EXPECT_EQ(decoded.ini_crc, 0x22222222u);
+  EXPECT_EQ(decoded.issued_at, 1000u);
+  EXPECT_EQ(decoded.expires_at, 1000u + relay::PASS_LIFETIME_SECONDS);
+  EXPECT_TRUE(decoded.pass_id != relay::RandomId());
 }
 
 } // namespace
@@ -259,6 +383,13 @@ int RunTests() {
   TestKeyRoundTrip(key_path, key);
   TestPassRoundTripAndRules(key);
   TestKeyRejectsCorruptFile(corrupt_path);
+  TestPingRoundVerdicts();
+  TestPingRoundRejectsBadPongs();
+  TestPingRoundSchedule();
+  TestMedianWithFewAnswers();
+  TestAddressRateLimit();
+  TestVpnHookAllowsEveryoneForNow();
+  TestIssuePass(key);
 
   static_cast<void>(std::remove(key_path.c_str()));
   static_cast<void>(std::remove((key_path + ".pub").c_str()));

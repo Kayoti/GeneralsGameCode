@@ -78,6 +78,8 @@ set_target_properties(libsodium PROPERTIES
 add_library(relay_core STATIC
     src/config.cpp
     src/config.h
+    src/entry_check.cpp
+    src/entry_check.h
     src/host.cpp
     src/host.h
     src/log.h
@@ -87,6 +89,7 @@ add_library(relay_core STATIC
     src/region_keys.cpp
     src/region_keys.h
     src/text.h
+    src/wire.h
 )
 
 target_include_directories(relay_core PUBLIC src)
@@ -97,6 +100,11 @@ target_compile_options(relay_core PRIVATE /W4 /WX)
 add_executable(relay src/main.cpp)
 target_link_libraries(relay PRIVATE relay_core ws2_32 winmm)
 target_compile_options(relay PRIVATE /W4 /WX)
+
+# Command-line entry check client for hand tests (docs/servers/packages/A2-relay-gate.md).
+add_executable(entry_check_client tools/entry_check_client.cpp)
+target_link_libraries(entry_check_client PRIVATE relay_core ws2_32 winmm)
+target_compile_options(entry_check_client PRIVATE /W4 /WX)
 
 if(RELAY_BUILD_TESTS)
     enable_testing()
