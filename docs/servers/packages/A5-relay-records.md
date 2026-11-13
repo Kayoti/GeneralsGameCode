@@ -38,7 +38,7 @@ Anything outside `Servers/Relay/`.
 - [x] The forwarding path allocates no memory per record.
 - [x] 32 failed records from one player hands that player to the drop path with reason `PROTOCOL`.
 - [x] The relay keeps counters per session: records in, forwarded, and dropped by reason. A debug setting logs each violation with type, frame and `next_frame`, so V7 and V8 can be checked against real traffic.
-- [ ] Reviewed by someone other than the author, with a dedicated pass on the header scan and on every bound.
+- [x] Reviewed by someone other than the author, with a dedicated pass on the header scan and on every bound.
 
 ## Out of scope
 
@@ -68,4 +68,8 @@ Rewriting frames or closing frames (S1).
   - Built with `cmake -S Servers/Relay -B C:\cnc-build\A5 -G Ninja -DCMAKE_BUILD_TYPE=Release -DRELAY_BUILD_TESTS=ON` in the VS x86 environment, `/W4 /WX`, exit 0. `ctest`: 1 of 1 passed (`relay_tests`).
   - `clang-format --dry-run --Werror` over `src`, `tests`, `tools`: clean. `clang-tidy` 22.1.3 (VS build tools) on `records.cpp`, `match_data.cpp`, `sessions.cpp`, `host.cpp`, `main.cpp`, `relay_tests.cpp`: 0 warnings after fixing three.
   - Not run: the relay against a client, the game builds (this package changes only `Servers/Relay/`).
-- Review findings and fixes:
+- Review findings and fixes: reviewed by a second developer with a dedicated pass on the header scan and every bound. Verdict: approved, no changes required. All findings are low or informational.
+  - In strict command-count mode a FRAMEINFO count mismatch is tallied in both the mismatch counter and the dropped-by-reason counter, so the end-of-session log counts the one event twice. Accounting only, no behavioural effect; left as is.
+  - The strict command-count switch and the violation log are command-line flags rather than relay.conf keys, because the config parser accepts only the PROTOCOL 7.2 keys and this package cannot change PROTOCOL. Reasonable; satisfies the intent.
+  - Rate windows are fixed one-second windows, so a burst can reach about twice the limit across a boundary. PROTOCOL is silent; acceptable.
+  - Confirmed correct: the header scan exact-matches the tag set and order per type and never reads past the record on any crafted header; checks 1 to 5 hold; the sender slot comes from the connection binding, never from the record; the forwarding table matches 4.6 and the first three types ignore the record's own mask; frame tracking starts at 30 with a 129-wide window and advances only on a valid FRAMEINFO; 32 failed records drop the player with reason PROTOCOL and last_frame = next_frame - 1; forwarding does no per-record allocation and forwards bytes unchanged; the command-type numbers are hardcoded constants that match the engine's `NetworkDefs.h`, with no engine header pulled into the relay; the minimal drop path takes a reason and does not clash with A6. Relay builds `/W4 /WX` clean and its tests pass.
