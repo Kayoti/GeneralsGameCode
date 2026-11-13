@@ -63,6 +63,9 @@
 #include "GameNetwork/NAT.h"
 #include "GameNetwork/GUIUtil.h"
 #include "GameNetwork/GameSpy/GSConfig.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/GameSpy/ServersMode.h"
+#endif
 
 void WOLDisplaySlotList();
 
@@ -242,6 +245,53 @@ void PopBackToLobby()
 		TheShell->pop();
 	}
 }
+
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 13/11/2026 Runs the entry check again when the player presses Accept or exits, and acts on its result.
+static Bool s_serversAcceptPassed = FALSE;
+
+// A refusal: the player leaves the staging room if still in it, the online lobby is closed and the main menu is shown.
+static void serversLeaveStagingRoom()
+{
+	ServersLogoutOnline();
+	if( !buttonPushed )
+	{
+		if( TheGameSpyInfo )
+		{
+			TheGameSpyInfo->getCurrentStagingRoom()->reset();
+			TheGameSpyInfo->leaveStagingRoom();
+		}
+		buttonPushed = true;
+		TheShell->pop();
+	}
+	// Already on the way back to the lobby: go to the main menu instead
+	nextScreen = nullptr;
+}
+
+static void updateServersGate()
+{
+	ServersGate action;
+	switch( ServersGateUpdate( SERVERS_GATE_ACCEPT | SERVERS_GATE_EXIT, &action ) )
+	{
+		case SERVERS_GATE_PASSED:
+			if( action == SERVERS_GATE_ACCEPT && !buttonPushed && parentWOLGameSetup && buttonStart && buttonStart->winGetEnabled() )
+			{
+				// Press Accept again: the handler lets it through once, because the check has passed
+				s_serversAcceptPassed = TRUE;
+				TheWindowManager->winSendSystemMsg( parentWOLGameSetup, GBM_SELECTED, (WindowMsgData)buttonStart, buttonStartID );
+				s_serversAcceptPassed = FALSE;
+			}
+			break;
+
+		case SERVERS_GATE_REFUSED:
+			serversLeaveStagingRoom();
+			break;
+
+		default:
+			break;
+	}
+}
+#endif
 
 void updateMapStartSpots( GameInfo *myGame, GameWindow *buttonMapStartPositions[], Bool onLoadScreen = FALSE );
 void positionStartSpots( GameInfo *myGame, GameWindow *buttonMapStartPositions[], GameWindow *mapWindow);
@@ -762,6 +812,11 @@ static void StartPressed()
 		mapDisplayName.format(L"%hs", myGame->getMap().str());
 		willTransfer = WouldMapTransfer(myGame->getMap());
 	}
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 Maps are never transferred in Servers mode, so a player without the map blocks the start.
+	if (ServersModeIsOn())
+		willTransfer = FALSE;
+#endif
 	int i = 0;
 	for( ; i < MAX_SLOTS; i++ )
 	{
@@ -776,6 +831,17 @@ static void StartPressed()
 				allHaveMap = FALSE;
 			}
 		}
+#ifdef RTS_SERVERS
+		// TheSuperHackers @feature Kayoti 13/11/2026 A player who has accepted but lacks the map also blocks the start in Servers mode.
+		else if (ServersModeIsOn() && myGame->getSlot(i)->isHuman() && !myGame->getSlot(i)->hasMap())
+		{
+			UnicodeString msg;
+			msg.format(TheGameText->fetch("GUI:PlayerNoMap"), myGame->getSlot(i)->getName().str(), mapDisplayName.str());
+			TheGameSpyInfo->addText(msg, GameSpyColor[GSCOLOR_DEFAULT], listboxGameSetupChat);
+			isReady = FALSE;
+			allHaveMap = FALSE;
+		}
+#endif
 		if(myGame->getSlot(i)->isOccupied() && myGame->getSlot(i)->getPlayerTemplate() != PLAYERTEMPLATE_OBSERVER)
 		{
 			if (myGame->getSlot(i)->isHuman())
@@ -1400,6 +1466,10 @@ static void fillPlayerInfo(const PeerResponse *resp, PlayerInfo *info)
 //-------------------------------------------------------------------------------------------------
 void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 {
+#ifdef RTS_SERVERS
+	updateServersGate();
+#endif
+
 	// We'll only be successful if we've requested to
 	if(isShuttingDown && TheShell->isAnimFinished() && TheTransitionHandler->isFinished())
 	{
@@ -1906,6 +1976,10 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 											mapDisplayName.format(L"%hs", TheGameState->getMapLeafName(game->getMap()).str());
 											willTransfer = WouldMapTransfer(game->getMap());
 										}
+#ifdef RTS_SERVERS
+										if (ServersModeIsOn())
+											willTransfer = FALSE;
+#endif
 										if (willTransfer)
 											text.format(TheGameText->fetch("GUI:LocalPlayerNoMapWillTransfer"), mapDisplayName.str());
 										else
@@ -2054,6 +2128,10 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 										mapDisplayName.format(L"%hs", game->getMap().str());
 										willTransfer = WouldMapTransfer(game->getMap());
 									}
+#ifdef RTS_SERVERS
+									if (ServersModeIsOn())
+										willTransfer = FALSE;
+#endif
 									UnicodeString text;
 									if (willTransfer)
 										text.format(TheGameText->fetch("GUI:PlayerNoMapWillTransfer"), game->getSlot(slotNum)->getName().str(), mapDisplayName.str());
@@ -2495,6 +2573,11 @@ WindowMsgHandledType WOLGameSetupMenuSystem( GameWindow *window, UnsignedInt msg
 					nextScreen = "Menus/WOLCustomLobby.wnd";
 					TheShell->pop();
 
+#ifdef RTS_SERVERS
+					// TheSuperHackers @feature Kayoti 13/11/2026 In Servers mode the entry check runs after the player has left.
+					if (ServersModeIsOn() && !ServersGateStart(SERVERS_GATE_EXIT))
+						serversLeaveStagingRoom();
+#endif
 				}
 				else if ( controlID == buttonCommunicatorID )
 				{
@@ -2522,6 +2605,18 @@ WindowMsgHandledType WOLGameSetupMenuSystem( GameWindow *window, UnsignedInt msg
 				}
 				else if ( controlID == buttonStartID )
 				{
+#ifdef RTS_SERVERS
+					// TheSuperHackers @feature Kayoti 13/11/2026 In Servers mode a player's Accept waits for the entry check.
+					if (ServersModeIsOn() && !TheGameSpyInfo->amIHost())
+					{
+						if (!s_serversAcceptPassed)
+						{
+							if (!ServersGateIsPending() && !ServersGateStart(SERVERS_GATE_ACCEPT))
+								serversLeaveStagingRoom();
+							break;
+						}
+					}
+#endif
 					savePlayerInfo();
 					if (TheGameSpyInfo->amIHost())
 					{

@@ -44,6 +44,9 @@
 #include "GameNetwork/GameInfo.h"
 #include "Common/PlayerTemplate.h"
 #include "GameNetwork/LANAPICallbacks.h" // for acceptTrueColor, etc
+#ifdef RTS_SERVERS
+#include "GameNetwork/GameSpy/ServersMode.h"
+#endif
 #include "GameClient/ChallengeGenerals.h"
 
 
@@ -381,6 +384,11 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 	{
 		willTransfer = WouldMapTransfer(myGame->getMap());
 	}
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 Maps are never transferred in Servers mode, so a player without the map cannot accept.
+	if (ServersModeIsOn())
+		willTransfer = FALSE;
+#endif
 
 	if (myGame)
 	{

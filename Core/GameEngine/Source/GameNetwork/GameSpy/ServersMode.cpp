@@ -30,10 +30,37 @@
 #include "GameClient/GameText.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/MessageBox.h"
+#include "GameNetwork/GameSpy/BuddyThread.h"
+#include "GameNetwork/GameSpy/PeerThread.h"
 #include "GameNetwork/GameSpy/ServersMode.h"
+#include "GameNetwork/GameSpyOverlay.h"
 
 // The region file is read from the working directory of the game.
 static const char *const SERVERS_REGION_FILE = "regions.txt";
+
+// The check run on player actions. The main menu drives the entry check below, so this one is kept apart.
+static ServerEntryCheck *s_gateCheck = nullptr;
+static GameWindow *s_gateWindow = nullptr;
+static ServersGate s_gateAction = SERVERS_GATE_NONE;
+static Bool s_gateCancelled = FALSE;
+
+static void closeGateWindow()
+{
+	if( s_gateWindow )
+	{
+		TheWindowManager->winDestroy( s_gateWindow );
+		s_gateWindow = nullptr;
+	}
+}
+
+static void releaseGate()
+{
+	closeGateWindow();
+	delete s_gateCheck;
+	s_gateCheck = nullptr;
+	s_gateAction = SERVERS_GATE_NONE;
+	s_gateCancelled = FALSE;
+}
 
 // State ------------------------------------------------------------------------------------------
 
@@ -72,6 +99,7 @@ void ServersModeSet( const ServerRegion &region, const ServerPass &pass )
 
 void ServersModeClear()
 {
+	releaseGate();
 	s_state.on = FALSE;
 	memset( &s_state.region, 0, sizeof( s_state.region ) );
 	s_state.pass = ServerPass();
@@ -242,6 +270,110 @@ ServersEntryResult ServersEntryUpdate()
 			releaseCheck();
 			showRefusal( SERVER_REFUSE_NO_ANSWER, 0, 0 );
 			return SERVERS_ENTRY_REFUSED;
+	}
+}
+
+// Entry check on player actions -----------------------------------------------------------------
+
+// The message box destroys its window after this returns
+static void gateCancelledCallback()
+{
+	s_gateWindow = nullptr;
+	delete s_gateCheck;
+	s_gateCheck = nullptr;
+	s_gateCancelled = TRUE;
+}
+
+Bool ServersGateStart( ServersGate action )
+{
+	releaseGate();
+
+	if( !s_state.on )
+		return FALSE;
+
+	s_gateCheck = NEW ServerEntryCheck;
+	if( !s_gateCheck->startRegion( s_state.region, TheGlobalData->m_exeCRC, TheGlobalData->m_iniCRC ) )
+	{
+		DEBUG_LOG(( "Servers: cannot start the entry check for action %d", (Int)action ));
+		releaseGate();
+		showRefusal( SERVER_REFUSE_NO_ANSWER, 0, 0 );
+		return FALSE;
+	}
+
+	s_gateAction = action;
+	s_gateWindow = MessageBoxCancel( TheGameText->fetch( "GUI:ServersChecking" ),
+		TheGameText->fetch( "GUI:ServersChecking" ), gateCancelledCallback );
+	return TRUE;
+}
+
+Bool ServersGateIsPending()
+{
+	return s_gateAction != SERVERS_GATE_NONE;
+}
+
+ServersGateResult ServersGateUpdate( UnsignedInt handled, ServersGate *action )
+{
+	*action = s_gateAction;
+	if( s_gateAction == SERVERS_GATE_NONE )
+		return SERVERS_GATE_IDLE;
+
+	if( s_gateCancelled )
+	{
+		releaseGate();
+		return SERVERS_GATE_CANCELLED;
+	}
+
+	s_gateCheck->update();
+
+	switch( s_gateCheck->getState() )
+	{
+		case ServerEntryCheck::STATE_RUNNING:
+			return SERVERS_GATE_CHECKING;
+
+		case ServerEntryCheck::STATE_PASSED:
+			if( ( handled & s_gateAction ) == 0 )
+				return SERVERS_GATE_IDLE;
+			ServersModeSet( s_gateCheck->getRegion(), s_gateCheck->getPass() );
+			DEBUG_LOG(( "Servers: entry check for action %d passed, ping %d ms",
+				(Int)s_gateAction, (Int)s_gateCheck->getPass().rttMs ));
+			releaseGate();
+			return SERVERS_GATE_PASSED;
+
+		case ServerEntryCheck::STATE_REFUSED:
+		{
+			if( ( handled & s_gateAction ) == 0 )
+				return SERVERS_GATE_IDLE;
+			const UnsignedByte code = s_gateCheck->getRefuseCode();
+			const UnsignedShort rttMs = s_gateCheck->getRttMs();
+			const UnsignedShort limitMs = s_gateCheck->getLimitMs();
+			DEBUG_LOG(( "Servers: entry check for action %d refused, code %d", (Int)s_gateAction, (Int)code ));
+			releaseGate();
+			showRefusal( code, rttMs, limitMs );
+			return SERVERS_GATE_REFUSED;
+		}
+
+		default:
+			// Idle again after a start: the check has no result, so it is dropped
+			releaseGate();
+			return SERVERS_GATE_CANCELLED;
+	}
+}
+
+void ServersLogoutOnline()
+{
+	GameSpyCloseAllOverlays();
+
+	if( TheGameSpyPeerMessageQueue )
+	{
+		PeerRequest req;
+		req.peerRequestType = PeerRequest::PEERREQUEST_LOGOUT;
+		TheGameSpyPeerMessageQueue->addRequest( req );
+	}
+	if( TheGameSpyBuddyMessageQueue )
+	{
+		BuddyRequest breq;
+		breq.buddyRequestType = BuddyRequest::BUDDYREQUEST_LOGOUT;
+		TheGameSpyBuddyMessageQueue->addRequest( breq );
 	}
 }
 
