@@ -36,7 +36,7 @@ Anything outside `Servers/Relay/`.
 - [x] The limits in PROTOCOL.md 6 for `CREATE`, `JOIN`, failed joins per session, concurrent sessions and connections without a first message are enforced.
 - [x] Random values come from the operating system's secure source.
 - [x] The test client from A2 gains modes to create and join a session.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -72,4 +72,9 @@ Forwarding records (A5). Removing players during a match (A6).
   - Live run on one PC (relay with `--no-address-check`, port 17777): create plus two joins gave `WELCOME`, `ROSTER`, `ROSTER`, `START` in order on all three; 4 expected with 2 connected gave `ROSTER`, `DROP` slot 1, `DROP` slot 3 (`NEVER_JOINED`, `last_frame` 29), `START` after 30 s; host alone gave `REFUSE` 17 after 30 s; a second `CREATE` with the same pass id gave `REFUSE` 9; the `idle` mode with 6 connections kept 4 and the relay logged the refusals.
   - `clang-format --dry-run --Werror` and `clang-tidy` 22.1.3 with the root `.clang-tidy` on `sessions.cpp`, `rate_limit.cpp`, `host.cpp`, `pass.cpp`, `main.cpp`, `tools/session_client.cpp`, `tests/relay_tests.cpp`: 0 warnings.
   - Not run: more than 1 address in a live test (all clients were 127.0.0.1), the 256 total limit, and the address check switched on.
-- Review findings and fixes:
+- Review findings and fixes: reviewed by a second developer after the branch was rebased onto A2. Verdict: approved, no changes required. All findings are low and spec-compliant.
+  - At the 30-second timeout, a slot that joined and then left before START gets `DROP NEVER_JOINED`, like a slot that never connected. No `FRAMEINFO` was forwarded before START, so `last_frame` 29 is correct either way; PROTOCOL is silent on this case. No change.
+  - The per-address CREATE/JOIN rate limit is consulted before the length/proto/pass checks, so a malformed CREATE/JOIN still spends the budget. This is a reasonable anti-abuse reading of the per-address limit; no change.
+  - After 32 failed joins a session answers `RATE_LIMITED` to further joins, as PROTOCOL 6 requires the session to refuse further joins; the code is a fair choice and is throttled by the per-address JOIN limit.
+  - Rate-limiter reconciliation checked: A2's and A4's two limiter classes were unified into one `AddressRateLimiter(max_events, window_ms)`. The entry check still uses 6 per 60 s with the identical window boundary, A2's entry-check test is preserved and passes, and both A2 and A4 test suites run and pass in the one `relay_tests` binary. No A2 regression.
+  - Confirmed correct: CREATE/JOIN validation and single-use tokens; `PASS_IN_USE`; ROSTER on change; START and the 30-second timeout with `NEVER_JOINED`/`NOT_ENOUGH_PLAYERS`; `leader_slot`; session cleanup frees pass ids; all slot/mask/index values bounded before use; the connection is bound to its slot at the pass check and later messages are attributed by connection, not by the claimed slot; session ids and tokens come from libsodium `randombytes_buf`; scope is `Servers/Relay/` only; the peer table is `256 + 8 per session` capped at ENet's limit.
