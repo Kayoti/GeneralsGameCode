@@ -71,12 +71,14 @@ void SendMessage(ENetPeer *peer, const unsigned char *data, std::size_t length) 
 }
 
 // Settings of the session manager. It checks passes with the public half of the region key held in settings.
-SessionSettings MakeSessionSettings(const EntryCheckSettings &settings, bool check_address, std::size_t max_sessions) {
+SessionSettings MakeSessionSettings(const EntryCheckSettings &settings, bool check_address, std::size_t max_sessions,
+                                    const RecordSettings &records) {
   SessionSettings session_settings;
   session_settings.public_key = settings.key.public_key;
   session_settings.region = settings.region;
   session_settings.check_address = check_address;
   session_settings.max_sessions = max_sessions;
+  session_settings.records = records;
   return session_settings;
 }
 
@@ -96,10 +98,10 @@ struct RelayHost::Connection {
 };
 
 RelayHost::RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings, bool check_address,
-                     std::size_t max_sessions)
+                     std::size_t max_sessions, const RecordSettings &records)
     : listen_port_(listen_port), next_connection_id_(1), host_(nullptr), settings_(settings),
       rate_limiter_(ENTRY_CHECKS_PER_WINDOW, RATE_WINDOW_MS), session_limit_(max_sessions),
-      sessions_(MakeSessionSettings(settings_, check_address, max_sessions), *this) {}
+      sessions_(MakeSessionSettings(settings_, check_address, max_sessions, records), *this) {}
 
 RelayHost::~RelayHost() {
   if (host_ == nullptr) {
@@ -288,7 +290,10 @@ void RelayHost::OnReceive(ENetPeer *peer, std::uint8_t channel_id, const unsigne
     sessions_.OnLeave(connection->m_id);
     return;
   }
-  // Records are added by a later package (A5).
+  if (data[0] == MSG_DATA && sessions_.IsBound(connection->m_id)) {
+    sessions_.OnData(connection->m_id, enet_time_get(), data + 1, length - 1);
+    return;
+  }
   LogLine("connection %u: message type %u dropped, no handler in this build", connection->m_id,
           static_cast<unsigned int>(data[0]));
 }

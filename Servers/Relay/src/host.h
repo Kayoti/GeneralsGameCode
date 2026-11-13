@@ -4,6 +4,7 @@
 
 #include "entry_check.h"
 #include "rate_limit.h"
+#include "records.h"
 #include "sessions.h"
 
 #include <cstddef>
@@ -20,8 +21,8 @@ namespace relay {
 class RelayHost : private SessionOutput {
 public:
   // check_address is false only with the relay's test start option. max_sessions is the concurrent session limit.
-  RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings, bool check_address,
-            std::size_t max_sessions);
+  RelayHost(std::uint16_t listen_port, const EntryCheckSettings &settings, bool check_address, std::size_t max_sessions,
+            const RecordSettings &records);
   ~RelayHost();
 
   RelayHost(const RelayHost &) = delete;

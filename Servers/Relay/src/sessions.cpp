@@ -75,7 +75,7 @@ struct SessionManager::CheckedPass {
 
 SessionManager::SessionManager(const SessionSettings &settings, SessionOutput &output)
     : settings_(settings), output_(output), create_limiter_(CREATE_PER_ADDRESS_PER_MINUTE, RATE_WINDOW_MS),
-      join_limiter_(JOIN_PER_ADDRESS_PER_MINUTE, RATE_WINDOW_MS) {}
+      join_limiter_(JOIN_PER_ADDRESS_PER_MINUTE, RATE_WINDOW_MS), out_buffers_(SLOT_COUNT * MAX_MESSAGE_SIZE) {}
 
 void SessionManager::Refuse(std::uint32_t connection, RefuseCode code) {
   unsigned char message[1 + REFUSE_BODY_SIZE] = {};
@@ -362,6 +362,7 @@ void SessionManager::RemoveSession(std::uint64_t session_id) {
     return;
   }
   const Session &session = found->second;
+  LogCounters(session);
   for (std::size_t slot = 0; slot < SLOT_COUNT; ++slot) {
     if (SlotInMask(session.m_connected_mask, slot)) {
       bindings_.erase(session.m_connections[slot]);
