@@ -1,6 +1,6 @@
 # D3 Lobby: entry check on join, Accept and exit; no map transfer; Quick Match hidden
 
-State: partial
+State: done
 Branch: servers-D3
 
 ## Goal
@@ -41,7 +41,7 @@ Every item applies only in Servers mode.
 - [ ] Quick Match cannot be reached. Code written and built, not run: `WOLWelcomeMenu.cpp` hides and ignores the Quick Match and Ladder buttons.
 - [x] In Online, none of this code runs. Every change is under `RTS_SERVERS` and `ServersModeIsOn()`, which is false in Online.
 - [x] Builds with the switch on and off. Lint reports no new warnings. Release builds exit 0. `scripts/run-clang-tidy.py --no-plugin` (switch-on PCH-free build): 0 issues on the 9 changed `.cpp` files after the review fix. Runs with several workers print exit code 1 with no issue listed; the five Zero Hour files run singly returned 0.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author. Reviewed over two rounds; approved after the refusal-teardown fix.
 
 ## Out of scope
 
@@ -64,7 +64,9 @@ Match start (2.1).
   - The online session is torn down deterministically on a refusal. `ServersLogoutOnline()` queues the peer and buddy logout, as the Welcome screen's Back does, and marks the teardown as due. `ServersTearDownOnline()` then calls `TearDownGameSpy()` from `shutdownComplete` of the lobby and the staging room, after their shutdown functions have used the session and before the shell initialises the main menu. It is not called inside `ServersLogoutOnline()`, because the lobby and staging room shutdown still use `TheGameSpyInfo` and the peer queue and would crash on a torn-down session. `ServersModeClear()` drops a teardown that was never taken. Not seen running.
   - The two staging room chat lines that said a map "will transfer" now also say "no map" in Servers mode. This goes beyond the two decision places in the package but keeps the text true.
   - The check box is the D1 message box, so Cancel on it is not a refusal: the player stays where they are and the action is not done (an Exit has already happened).
-  - Builds and lint: see the final report of the session that wrote these notes; no PROTOCOL.md section 10 assumption concerns this package.
+  - Builds and lint: switch on and off exit 0 (Release); clang-tidy clean on the nine changed files (see the Done-when build line above). No PROTOCOL.md section 10 assumption concerns this package.
 - Review findings and fixes:
   - Medium, fixed: the refusal teardown depended on a race with the peer thread in `MainMenuInit`. Now `ServersTearDownOnline()` runs `TearDownGameSpy()` in the lobby and staging room `shutdownComplete`.
   - Low, fixed: the per-frame `updateServersGate()` calls are wrapped in `ServersModeIsOn()`.
+  - Verdict after the fix: approved, no remaining findings. The reviewer confirmed from the code that the teardown is deterministic: the lobby and staging-room shutdown functions still use `TheGameSpyInfo` and the peer queue, so `TearDownGameSpy()` is correctly deferred to `shutdownComplete`, which runs after that shutdown and before `MainMenuInit` (`Shell::shutdownComplete` -> `doPop` -> the new screen's init). Every refusal path (lobby join, non-host Accept, exit, and a refusal that arrives mid-shutdown) reaches a `shutdownComplete` that tears the session down, so none lands on the main menu with a live online session. The teardown-due flag is set only on a refusal, cleared before the teardown and idempotent, and `ServersModeClear()` can only drop it, so a normal exit or a successful pass never tears down. Zero Hour and Generals changes are identical; every new path is behind `RTS_SERVERS` and `ServersModeIsOn()`, so the switch-off build and Online are unchanged. Commits are by Kayoti with no trailers.
+  - Needs the game installed: every on-screen item above (the Checking box and Cancel on join, Accept and exit; the refusal message and return to the main menu with the session closed; Accept disabled without the map and the host "no map" line; Quick Match and Ladder absent from the Welcome screen). These are the Phase 1 D gate and were not run here. The teardown fix was verified by code only, not in the running game.
