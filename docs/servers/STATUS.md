@@ -30,7 +30,7 @@ Track D edits existing online lobby files. Every change there is behind the buil
 | Package | Title | Depends on | State |
 |---|---|---|---|
 | [0.1](packages/0.1-protocol.md) | Protocol specification | none | done |
-| [0.2](packages/0.2-build-switch.md) | Build switch and folder layout | none | todo |
+| [0.2](packages/0.2-build-switch.md) | Build switch and folder layout | none | done |
 | [0.3](packages/0.3-region-config.md) | Region configuration format | 0.1 | partial: formats are in PROTOCOL.md section 7; example files are added once 0.2 has created the folders |
 | 0.4 | Write the package files for Phase 1 | 0.1 | done |
 
@@ -93,3 +93,4 @@ Phase 1 gate:
 | 2026-11-12 | Scope reduced: the existing online lobby is kept, the separate lobby server is dropped, and the relay is the only new program. PROTOCOL.md rewritten to match. |
 | 2026-11-12 | Technical choices D30 to D33 confirmed by the project owner. Phase 1 package files written. |
 | 2026-11-12 | PROTOCOL.md reviewed against the engine code by a second reviewer. 17 findings, all addressed in the document. Details are in the handoff notes of package 0.1. |
+| 2026-11-13 | Build switch added (0.2): `RTS_BUILD_OPTION_SERVERS`, off by default, gates the `RTS_SERVERS` define. `Servers/Relay/` and `Servers/Client/` folders registered. Game configures and builds with the switch on and off. |
