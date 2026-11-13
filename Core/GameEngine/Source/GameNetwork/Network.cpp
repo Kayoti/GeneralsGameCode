@@ -118,6 +118,11 @@ public:
 	virtual Bool isFrameDataReady() override;
 	virtual Bool isStalling() override;
 	virtual void parseUserList( const GameInfo *game ) override;
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 Adds the server mode flag. NetworkInterface does not expose it yet.
+	void setServerMode( Bool serverMode );															///< Must be called after init and before parseUserList.
+	Bool isServerMode();
+#endif
 	virtual void startGame() override;																			///< Sets the network game frame counter to -1
 
 	virtual void sendChat(UnicodeString text, Int playerMask) override;
@@ -412,6 +417,22 @@ void Network::parseUserList( const GameInfo *game )
 	m_conMgr->destroyGameMessages();
 	m_conMgr->zeroFrames(1, m_runAhead-1); ///< we zero out m_runAhead frames +1 because the game actually starts at frame 1.
 }
+
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 13/11/2026 Stores the server mode flag in the connection manager, which init creates anew for each game.
+void Network::setServerMode( Bool serverMode )
+{
+	DEBUG_ASSERTCRASH(m_conMgr != nullptr, ("Connection manager does not exist."));
+	if (m_conMgr != nullptr) {
+		m_conMgr->setServerMode(serverMode);
+	}
+}
+
+Bool Network::isServerMode()
+{
+	return (m_conMgr != nullptr) && m_conMgr->isServerMode();
+}
+#endif
 
 /**
  * Guess what, we're starting a game!

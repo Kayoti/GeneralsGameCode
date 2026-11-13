@@ -61,6 +61,11 @@ public:
 	void attachTransport(Transport *transport);
 
 	void parseUserList(const GameInfo *game);
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 13/11/2026 Adds the server mode flag. It is set before parseUserList and is off by default.
+	void setServerMode(Bool serverMode) { m_serverMode = serverMode; }
+	Bool isServerMode() const { return m_serverMode; }
+#endif
 	void sendChat(UnicodeString text, Int playerMask, UnsignedInt executionFrame);
 	void sendDisconnectChat(UnicodeString text);
 	void sendLocalCommand(NetCommandMsg *msg, UnsignedByte relay = 0xff);		///< Send command to the players specified in the relay, goes through packet router.
@@ -207,6 +212,9 @@ private:
 	Int  m_minFps;
 	UnsignedInt m_smallestPacketArrivalCushion;
 	Bool m_didSelfSlug;
+#ifdef RTS_SERVERS
+	Bool m_serverMode;												///< Match traffic goes through the relay server instead of between the players.
+#endif
 
 	// -----------------------------------------------------------------------------
 	FileCommandMap s_fileCommandMap;

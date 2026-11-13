@@ -65,6 +65,7 @@ endif()
 
 include(cmake/config.cmake)
 include(cmake/gamespy.cmake)
+include(cmake/enet.cmake)
 if (IS_VS6_BUILD)
     add_library(gamemath INTERFACE)
 else()
