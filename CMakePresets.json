@@ -175,6 +175,16 @@
             }
         },
         {
+            "name": "win32-vcpkg-servers",
+            "inherits": "win32-vcpkg",
+            "displayName": "Windows 32bit VCPKG Servers",
+            "cacheVariables": {
+                "RTS_BUILD_OPTION_SERVERS": "ON",
+                "RTS_DEBUG_MULTI_INSTANCE": "ON",
+                "RTS_BUILD_GENERALS": "OFF"
+            }
+        },
+        {
             "name": "win32-vcpkg-optimized",
             "inherits": "win32-vcpkg",
             "displayName": "Windows 32bit VCPKG Optimized",

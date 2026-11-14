@@ -128,6 +128,14 @@ if(RTS_BUILD_OPTION_PROFILE)
     target_compile_definitions(core_config INTERFACE RTS_PROFILE_LEGACY)
 endif()
 
+# Servers mode: all game code for it is behind RTS_SERVERS. Off by default, so the build matches upstream.
+option(RTS_BUILD_OPTION_SERVERS "Build with Servers mode, which plays matches through a relay server." OFF)
+add_feature_info(Servers RTS_BUILD_OPTION_SERVERS "Building with Servers mode")
+
+if(RTS_BUILD_OPTION_SERVERS)
+    target_compile_definitions(core_config INTERFACE RTS_SERVERS)
+endif()
+
 # Define a dummy Tracy target when the build option is disabled.
 if(RTS_BUILD_OPTION_PROFILE_TRACY)
     include(cmake/tracy.cmake)
