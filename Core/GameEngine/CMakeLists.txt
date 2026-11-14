@@ -565,6 +565,7 @@ set(GAMEENGINE_SRC
     Include/GameNetwork/NetworkInterface.h
     Include/GameNetwork/networkutil.h
     Include/GameNetwork/RankPointValue.h
+    Include/GameNetwork/ServersDirect.h
     Include/GameNetwork/Transport.h
     Include/GameNetwork/udp.h
     Include/GameNetwork/User.h
@@ -1173,6 +1174,7 @@ set(GAMEENGINE_SRC
     Source/GameNetwork/NetPacketStructs.cpp
     Source/GameNetwork/Network.cpp
     Source/GameNetwork/NetworkUtil.cpp
+    Source/GameNetwork/ServersDirect.cpp
     Source/GameNetwork/Transport.cpp
     Source/GameNetwork/udp.cpp
     Source/GameNetwork/User.cpp

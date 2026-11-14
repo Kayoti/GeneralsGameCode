@@ -35,6 +35,9 @@
 #include "GameClient/TerrainVisual.h" // for TERRAIN_LOD_MIN definition
 #include "GameClient/GameText.h"
 #include "GameNetwork/NetworkDefs.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServersDirect.h"
+#endif
 
 
 
@@ -310,6 +313,41 @@ Int parseLogObjectCRCs(char *args[], int argc)
 #endif
 	return 1;
 }
+
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 14/11/2026 Adds the launch flags that start a Servers match through the relay without the lobby.
+Int parseServersHost(char *args[], int num)
+{
+	ServersDirectSetFlag(SERVERS_DIRECT_FLAG_HOST, nullptr);
+	return 1;
+}
+
+Int parseServersJoin(char *args[], int num)
+{
+	ServersDirectSetFlag(SERVERS_DIRECT_FLAG_JOIN, nullptr);
+	return 1;
+}
+
+static Int parseServersValue(ServersDirectFlag flag, char *args[], int num)
+{
+	if (num > 1)
+	{
+		ServersDirectSetFlag(flag, args[1]);
+		return 2;
+	}
+	// The value is missing: reject the flag and consume only the flag itself.
+	ServersDirectSetFlag(flag, nullptr);
+	return 1;
+}
+
+Int parseServersRelay(char *args[], int num)   { return parseServersValue(SERVERS_DIRECT_FLAG_RELAY, args, num); }
+Int parseServersPort(char *args[], int num)    { return parseServersValue(SERVERS_DIRECT_FLAG_PORT, args, num); }
+Int parseServersSlot(char *args[], int num)    { return parseServersValue(SERVERS_DIRECT_FLAG_SLOT, args, num); }
+Int parseServersPlayers(char *args[], int num) { return parseServersValue(SERVERS_DIRECT_FLAG_PLAYERS, args, num); }
+Int parseServersMap(char *args[], int num)     { return parseServersValue(SERVERS_DIRECT_FLAG_MAP, args, num); }
+Int parseServersSession(char *args[], int num) { return parseServersValue(SERVERS_DIRECT_FLAG_SESSION, args, num); }
+Int parseServersToken(char *args[], int num)   { return parseServersValue(SERVERS_DIRECT_FLAG_TOKEN, args, num); }
+#endif // RTS_SERVERS
 
 //=============================================================================
 //=============================================================================
@@ -1212,6 +1250,17 @@ static CommandLineParam paramsForEngineInit[] =
 	{ "-mod", parseMod },
 	{ "-noshaders", parseNoShaders },
 	{ "-quickstart", parseQuickStart },
+#ifdef RTS_SERVERS
+	{ "-serversHost", parseServersHost },
+	{ "-serversJoin", parseServersJoin },
+	{ "-serversRelay", parseServersRelay },
+	{ "-serversPort", parseServersPort },
+	{ "-serversSlot", parseServersSlot },
+	{ "-serversPlayers", parseServersPlayers },
+	{ "-serversMap", parseServersMap },
+	{ "-serversSession", parseServersSession },
+	{ "-serversToken", parseServersToken },
+#endif
 	{ "-useWaveEditor", parseUseWaveEditor },
 
 	// TheSuperHackers @feature bobtista 22/07/2026 Load a save game file from the command line.
