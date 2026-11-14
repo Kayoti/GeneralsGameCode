@@ -5,7 +5,7 @@
 number    = 1
 name      = Europe
 relay     = eu.relay.example.net:7777
-tag       = srv-eu
+tag       = eu
 tag_port  = 1
 
 # To add a region, copy a block and change its values. Example:
