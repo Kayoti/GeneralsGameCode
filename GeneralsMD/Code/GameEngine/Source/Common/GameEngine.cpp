@@ -104,6 +104,9 @@
 #include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/WOLBrowser/WebBrowser.h"
 #include "GameNetwork/LANAPI.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServersDirect.h"
+#endif
 #include "GameNetwork/GameSpy/GameResultsThread.h"
 
 #include "Common/version.h"
@@ -890,6 +893,11 @@ void GameEngine::update()
 			TheAudio->UPDATE();
 			TheGameClient->UPDATE();
 			TheMessageStream->propagateMessages();
+
+#ifdef RTS_SERVERS
+			// TheSuperHackers @feature Kayoti 14/11/2026 Drives the direct Servers match start given by launch flags. It does nothing without the flags.
+			ServersDirectUpdate();
+#endif
 
 			if (TheNetwork != nullptr)
 			{
