@@ -1,0 +1,115 @@
+# Status
+
+Updated when packages merge into `servers`. The live state of a package is in its own file under [packages/](packages/).
+
+## Phases
+
+| Phase | Goal | Gate |
+|---|---|---|
+| 0. Foundations | Protocol, build switch, region config, package files | Documents complete. Game builds with the switch on and off, and Online and Network behave as before. |
+| 1. Core pieces | Relay, client netcode, client lobby changes, in three parallel tracks | Three checks, listed under Phase 1 |
+| 2. Integration | Staging room start leads into a relay match | Two players go from the Servers button to a finished match |
+| 3. Server clock | Relay sets the frame timing and drops slow players | Three-player match with one instance under injected latency: the other two do not freeze, and no desync is reported |
+| 4. Deployment | EU relay and configuration | Match on the hosted relay. A flagged address and an over-limit ping are both refused. |
+
+## File ownership
+
+| Track | Owns |
+|---|---|
+| Main (phases 0 and 2) | `docs/servers/`, `cmake/`, `Servers/Client/` (client configuration files, such as the region file; first written in 0.3) |
+| A. Relay server | `Servers/Relay/` (created in 0.2 with a placeholder build file that the game build does not use) |
+| C. Client netcode | `Core/GameEngine/Source/GameNetwork/` and `Core/GameEngine/Include/GameNetwork/`, top level only, except `LANAPI*`, `NAT.*` and `FirewallHelper.*` |
+| D. Client lobby | `GameNetwork/GameSpy/` in `Core/`; `*/GameClient/GUI/` and `GameNetwork/GUIUtil.cpp` in `GeneralsMD/` and `Generals/` |
+
+`LANAPI*`, `NAT.*` and `FirewallHelper.*` are not edited by anyone.
+
+Track D edits existing online lobby files. Every change there is behind the build switch and must leave Online behaviour identical.
+
+## Phase 0
+
+| Package | Title | Depends on | State |
+|---|---|---|---|
+| [0.1](packages/0.1-protocol.md) | Protocol specification | none | done |
+| [0.2](packages/0.2-build-switch.md) | Build switch and folder layout | none | done |
+| [0.3](packages/0.3-region-config.md) | Region configuration format | 0.1 | done |
+| 0.4 | Write the package files for Phase 1 | 0.1 | done |
+
+## Phase 1
+
+D1 needs only the two headers that C1 defines, so tracks C and D can start together once C1 has published them.
+
+| Package | Title | Depends on | State |
+|---|---|---|---|
+| [A1](packages/A1-relay-host.md) | Relay: ENet host, configuration, pass signing and checking | 0.1, 0.2, 0.3 | done |
+| [A2](packages/A2-relay-gate.md) | Relay: entry check with ping measurement and ping limit | A1 | done |
+| [A3](packages/A3-relay-vpn.md) | Relay: VPN check on the entry check | A2 | done |
+| [A4](packages/A4-relay-sessions.md) | Relay: sessions (create, join, roster, start) | A1 | done |
+| [A5](packages/A5-relay-records.md) | Relay: record validation and forwarding | A4 | done |
+| [A6](packages/A6-relay-drop.md) | Relay: timeouts and dropping players | A5 | done |
+| [C1](packages/C1-client-link.md) | Client: ENet relay link, entry check client and server mode in connection setup | 0.1, 0.2, 0.3 | done |
+| [C2](packages/C2-client-records.md) | Client: commands sent and received as records, player drop from the server | C1 | done |
+| [C3](packages/C3-client-flags.md) | Client: launch flags to create or join a relay match directly | C1 | done |
+| [D1](packages/D1-servers-button.md) | Lobby: Servers button, entry check on entry, refusal messages | 0.2, 0.3, C1 | done |
+| [D2](packages/D2-tag-filter.md) | Lobby: tag on created lobbies, list filter in both modes | D1 | done |
+| [D3](packages/D3-gate-triggers.md) | Lobby: entry check on join, Accept and exit; ladder and Quick Match hidden | D1 | done |
+
+Phase 1 gate:
+
+| Tracks | Check |
+|---|---|
+| A + C | Two instances finish a match through a relay on the same PC, started with the launch flags from C3 |
+| A | The relay test client is refused from a flagged address and from an over-limit ping, and receives a pass otherwise |
+| D | From Servers, a lobby created by one instance appears in the other's list, and does not appear from Online |
+
+## Phase 2
+
+| Package | Title | Depends on | State |
+|---|---|---|---|
+| [2.1](packages/2.1-match-start.md) | Staging room start creates the relay session and hands each player its join token | A, C, D | done |
+| 2.2 | Match end returns players to the lobby | 2.1 | todo |
+
+## Phase 3
+
+| Package | Title | Depends on | State |
+|---|---|---|---|
+| S1 | Relay: frame clock | Phase 2 | todo |
+| S2 | Client: follow the server clock | Phase 2 | todo |
+| S3 | Server-driven disconnects replace the vote screen in server mode | S1, S2 | todo |
+
+## Phase 4
+
+| Package | Title | Depends on | State |
+|---|---|---|---|
+| 4.1 | Relay build and run instructions, VPN data updates | Phase 3 | todo |
+| 4.2 | EU relay rollout | 4.1 | todo |
+
+## Log
+
+| Date | Change |
+|---|---|
+| 2026-11-12 | Documentation set created. No code changes yet. |
+| 2026-11-12 | `servers` is based on upstream commit `8aaa4f731`. Every function named in CODEMAP.md was checked against that commit. |
+| 2026-11-12 | Launch region set to EU. Player-facing text set to English. Ping limit added. |
+| 2026-11-12 | Scope reduced: the existing online lobby is kept, the separate lobby server is dropped, and the relay is the only new program. PROTOCOL.md rewritten to match. |
+| 2026-11-12 | Technical choices D30 to D33 confirmed by the project owner. Phase 1 package files written. |
+| 2026-11-12 | PROTOCOL.md reviewed against the engine code by a second reviewer. 17 findings, all addressed in the document. Details are in the handoff notes of package 0.1. |
+| 2026-11-13 | Build switch added (0.2): `RTS_BUILD_OPTION_SERVERS`, off by default, gates the `RTS_SERVERS` define. `Servers/Relay/` and `Servers/Client/` folders registered. Game configures and builds with the switch on and off. |
+| 2026-11-13 | Region example files added (0.3): `Servers/Client/regions.txt` and `Servers/Relay/relay.conf`, matching the PROTOCOL section 7 formats, EU region with a commented second region. Phase 0 documents complete. |
+| 2026-11-13 | A1 and C1 blocked: PROTOCOL.md section 4.3 is inconsistent on the pass size. The field table totals 100 bytes, but the text says 96 and section 4.2 repeats "96-byte pass". The pass byte layout must be fixed on `servers` before the relay pass module (A1) and the client entry check and link (C1) can be written. Details in each package's handoff notes. |
+| 2026-11-13 | Pass size resolved to 100 bytes (section 4.3), matching the field table. The three "96-byte pass" references in 4.2 and the "Total 96 bytes" line are corrected. CREATE body is 104 bytes, JOIN is 119. A1 and C1 reopened. |
+| 2026-11-13 | Relay host merged (A1): standalone ENet relay in `Servers/Relay/` that reads its config, signs and checks the 100-byte pass, generates region keys, and disconnects connections with no valid first message. ENet and libsodium pinned. Incoming packets bounded to the message limit and to channel 0. Builds and unit tests pass. |
+| 2026-11-13 | Lobby tag and filter merged (D2): a lobby created in Servers mode carries its region tag in the existing ladder address fields, the lobby list shows only the player's region from Servers and hides tagged lobbies from Online, the own-tag unknown-ladder refusal is skipped, and the ladder choice and score-screen ladder report are hidden in Servers mode. Online is unchanged with the switch off. Builds with the switch on and off; the filtered list and the tag round-trip still need the running game and a lobby service. |
+| 2026-11-13 | Servers button merged (D1): a Servers button in the Multiplayer menu that runs the entry check against every region, shows "Checking connection", and on a pass sets the Servers mode state and opens the existing online login. Refusal messages for VPN, ping-too-high and unreachable, all in English from the text system. New `ServersMode` state in `GameNetwork/GameSpy/`. Builds with the switch on and off; the on-screen look and flow still need checking in the running game. |
+| 2026-11-13 | Relay VPN check merged (A3): the relay refuses an entry check from a listed network range or operator, using free data files held in memory (libmaxminddb for the operator database), with an allow list that overrides. Flagged addresses get REFUSE VPN_DETECTED before the ping. Data reloads on Ctrl+Break. libmaxminddb added to the relay build. Relay builds and tests pass. |
+| 2026-11-13 | Relay drops merged (A6): the relay removes a player on a lost connection, a 120-second loading timeout, a 20-second stall of the slowest slot, and a leave without a proper leave frame, each with the matching DROP reason, reusing the existing drop path. A clean leave gives a roster update only. The drop, loading and stall times are relay configuration values. Relay builds and tests pass. The A relay track (A1 to A6) is code-complete. |
+| 2026-11-13 | Relay records merged (A5): the relay validates each match record against the PROTOCOL 4.6 header rules and per-type checks, forwards the bytes unchanged to the right players with no per-record allocation, tracks frames and command counts, enforces data rate limits, and drops a player after 32 failed records. The command type numbers match the engine without including engine code. Relay builds and tests pass. |
+| 2026-11-13 | Relay sessions merged (A4): CREATE/JOIN with single-use join tokens, random session ids and tokens, roster updates, START and the 30-second never-joined timeout, pass-id-in-use refusal, and per-session and per-address limits. The entry-check and session rate limiters are unified into one. Relay builds and tests pass. |
+| 2026-11-13 | Relay entry check merged (A2): CHECK_HELLO handling, 8-ping measurement on the relay clock with the median, ping-limit refusal, PASS issuing, a per-address rate limit, and a test client under `Servers/Relay/tools/`. Shared byte helpers moved to `wire.h`. Relay builds and tests pass. |
+| 2026-11-13 | C3 (launch flags) blocked: a flag-started direct match must set the server-mode flag, hand the `ServerLink` to the networking code, and be driven each frame, none of which C3's file list can reach. That wiring belongs to 2.1 (which does not depend on C3), so C3 is deferred until after 2.1. The flag names, seed and default factions are also unspecified. Details in the C3 package handoff notes. |
+| 2026-11-13 | Client records merged (C2): in server mode the client carries each match command as a relay record instead of using the engine's own packet and acknowledgement layer, checks received records by type, and applies a server drop in place of the vote screen, all without changing the lockstep result. The simulation is unchanged with the switch off. Builds with the switch on and off. A live two-instance match is still to be run. |
+| 2026-11-13 | Client relay link merged (C1): `ServerRegions`, `ServerEntryCheck` and `ServerLink` in `Core/GameEngine/.../GameNetwork`, behind the Servers switch, with ENet pinned and isolated in `core_serverlink`. Headers are ENet-free for tracks C and D. `ConnectionManager` gains an off-by-default server-mode flag. Game builds with the switch on and off. V1 settled: ENet compiles with the game toolchain without clashing with the engine's winsock. |
+| 2026-11-13 | Lobby gate triggers merged (D3): in Servers mode the entry check runs again on join, on a non-host Accept and on leaving a staging room, each with the "Checking connection" box; a pass replaces the stored pass and a refusal shows the D1 message, tears the online session down and returns to the main menu. Map transfer is treated as unavailable, so a player without the map cannot Accept and the host cannot start while one lacks it; Quick Match and the ladder are hidden on the Welcome screen. The refusal teardown is deterministic (done in the lobby and staging-room `shutdownComplete`). Reviewed over two rounds, approved after that fix. Builds with the switch on and off; the on-screen flow still needs the running game. The D lobby track (D1 to D3) is code-complete. |
+| 2026-11-14 | Launch flags merged (C3): the project owner widened C3's file list to add one `ServersDirectUpdate()` call in `GameEngine::update()` in both titles. A new `ServersDirect` file pair adds `-serversHost/-serversJoin/-serversRelay/-serversPort/-serversSlot/-serversPlayers/-serversMap/-serversSession/-serversToken`, runs the entry check against the flag relay, sends CREATE (host, logging the session id and join tokens) or JOIN (joiner), and on the relay's reply launches a `GAME_LAN` match with a fixed seed and factions, reusing 2.1's link hand-over. The call is a no-op without the flags and all of it is behind the switch, so a normal launch and the switch-off build are unchanged. Reviewed and approved. Builds with the switch on and off; the live two-instance flag-started match is the Phase 1 A+C gate and needs the game installed. TESTING.md documents the flags and the multi-instance build. All Phase 0 and Phase 1 packages and 2.1 are now code-complete. |
+| 2026-11-13 | C3 (launch flags) re-checked after 2.1 and still blocked. 2.1 settled the networking wiring: `Network::parseUserList` sets the server-mode flag and attaches the match link, and the in-match per-frame drive runs through `ConnectionManager::updateServerMode`. What is still missing is a call site to drive the entry check and the CREATE/JOIN handshake each frame before the match loop: `ServersEntryUpdate` and `ServersMatchUpdate` are only driven from the menus, `CommandLine.cpp` runs at init before the client exists, and the subsystem list does not update the C3 file. C3's file list cannot reach a per-frame call site, so the package cannot be built as scoped. Owner decision: either widen C3's "May edit" to add one `ServersDirectUpdate()` call in `GameEngine::update()` in both titles, or have a later package that already edits `GameEngine.cpp` add it. Flag names, seed and default factions are also unspecified; the handoff proposes defaults. |
+| 2026-11-13 | Match start merged (2.1): pressing Start in a Servers lobby now creates a relay session instead of negotiating player to player. The host needs two human players, shows "Contacting server", sends CREATE, and on CREATED hands each other player a private message with the session id, its slot and its join token (PROTOCOL 5.4) before the start signal; a refused or timed-out CREATE, or a roster change before the signal, reopens the lobby with Start enabled. Members join with their private values, or return to the list with a message if they have none or are refused. NAT is not created; the match starts on START with the server flag set and the relay link handed to the connection manager. Reviewed and approved after one low UI fix. Builds with the switch on and off. The live two-instance match is the Phase 2 gate and still needs the game installed. Phase 2 is code-complete except 2.2 (match end). |
+| 2026-11-14 | Live two-instance relay match verified on one PC (Phase 1 A+C gate). Built `win32` with `RTS_BUILD_OPTION_SERVERS=ON` and `RTS_DEBUG_MULTI_INSTANCE=ON`, ran the standalone relay (`--no-address-check`, `vpn_check = off`) on `127.0.0.1:7777`, and started a host and a joiner from the C3 launch flags. Observed end to end: host entry check pass (ping ~16 ms), relay `pass issued`, `CREATE` to `session created for 2 players`, joiner pass and `JOIN` to `joined slot 1`, relay `session started with 2 players`, both instances loaded the map, placed starting units and ran the lockstep simulation with `FRAMEINFO` command data flowing through the relay. Not played through to the score screen. Engine unit tests (`z_googletest`, `g_googletest`) and the relay suite (`relay_tests`) pass. Two findings recorded in TESTING.md Notes: the `-serversMap` resolver needs the official map cache (a GeneralsOnline-only install has none), and the GeneralsOnline community data patch loads via `-mod` but then crashes this vanilla build, so Servers mode must be built into the GeneralsOnline engine rather than run as vanilla plus patch. |
