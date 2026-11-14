@@ -1,0 +1,4 @@
+# Key material must never be committed.
+keys/
+*.key
+*.pub

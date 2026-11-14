@@ -1,0 +1,38 @@
+// String entries of Servers mode. Add them to the game string file (Generals.str).
+// All Servers text is English. %d stands for a number.
+
+GUI:Servers
+"Servers"
+END
+
+GUI:ServersTitle
+"Servers"
+END
+
+GUI:ServersChecking
+"Checking connection"
+END
+
+GUI:ServersVpnDetected
+"VPN detected. Disable your VPN to play on Servers."
+END
+
+GUI:ServersPingTooHigh
+"Your connection to the server is too slow (%d ms, limit %d ms)."
+END
+
+GUI:ServersCannotConnect
+"The server cannot be reached."
+END
+
+GUI:ServersContacting
+"Contacting server"
+END
+
+GUI:ServersCouldNotJoin
+"Could not join the match."
+END
+
+GUI:ServersStartRosterChanged
+"A player joined or left. Press Start again."
+END
