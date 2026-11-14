@@ -9,6 +9,56 @@ These add to the project's [CONTRIBUTING.md](../../CONTRIBUTING.md). Where they 
 - Zero Hour only (`GeneralsMD/` and shared `Core/` code). Do not change `Generals/`.
 - When a package tells you to take a file from the `servers` branch, take it unchanged first, commit that, and make your changes in a second commit. This keeps the difference reviewable.
 
+## Readable code
+
+These rules apply to all three programs: the game client, the relay and the lobby service. Code is written for the next person who reads it. A reviewer reports a breach of these rules as a finding, the same as a bug.
+
+Inside an existing engine or Generals Online function, match that function's style. Every new function, type and file follows the rules below.
+
+Names
+
+- A name says what the thing is or does, in full words: `regionPingLimitMs`, not `rpl` or `tmp2`. Short names are for loop counters and for scopes of a few lines.
+- Functions are named for their action (`sendJoinRequest`), booleans for the question they answer (`isHost`, `hasPass`).
+- A value with a unit carries the unit in its name: `timeoutMs`, `lengthBytes`, `startFrame`.
+- One term per concept across code and documents. Use the terms in OVERVIEW.md and PROTOCOL.md; do not invent a second word for the same thing.
+- Follow the naming convention of the file's language and neighbours: engine conventions in engine files, Go conventions in Go files.
+
+Functions
+
+- A function does one thing, and its name says which. If describing it needs "and", split it.
+- Aim for functions that fit on one screen, about 60 lines. A longer one needs a reason a reviewer accepts.
+- At most three levels of nesting. Handle errors and special cases first and return early, so the main path is not indented.
+- At most five parameters. Group related values in a struct beyond that. No boolean parameter whose meaning is unreadable at the call site; use an enum or two functions.
+- No hidden side effects. A function named as a query does not change state.
+
+Values and state
+
+- No unexplained numbers or strings in logic. Every size, limit, timeout, message id and status code is a named constant, defined once, with the document section it comes from where one exists.
+- Declare a variable where it is first needed, in the smallest scope, and initialize it there.
+- No new global mutable state. Where the engine's existing globals must be used, keep the use in one place.
+- The same logic exists once. If a second copy is needed, extract a function.
+
+Comments
+
+- A comment explains why: the reason, the constraint, or the document section the code implements. It does not restate what the code says.
+- Every new file starts with a short comment on its purpose. Every non-obvious function says what it expects and what it returns, including units and ownership of pointers.
+- A comment that no longer matches the code is a bug. Update or remove it in the same change.
+- No commented-out code, no notes to self, no history in comments. History belongs in the commit message.
+
+Errors
+
+- Every result that can fail is checked at the call. Nothing is ignored silently.
+- An error message says what failed and with which value, so it can be acted on without a debugger. It never contains the secrets listed under Security.
+- Fail at the point of detection. Do not pass a bad value on for other code to stumble over.
+
+Structure
+
+- One concern per file. A file that mixes network parsing, state and menus is split.
+- Headers and package interfaces expose only what other code needs. Helpers are file-local (`static` or an unnamed namespace in C++, unexported in Go).
+- No dead code: no unused functions, parameters, includes, imports or variables.
+- New code compiles without new compiler warnings.
+- Prefer the simple construct. No clever tricks, no macros where a function works, no abstraction with a single user.
+
 ## Game client code
 
 - Match the style of the surrounding code. The engine is C++98 in style and must stay simple to read. Generals Online's own files use a newer style; match whichever file you are in.
@@ -74,7 +124,7 @@ The relay and the lobby service face the internet. Treat everything a client sen
 | Relay | Builds with its own build file. `relay_tests` pass. |
 | Lobby service | `gofmt -l .` prints nothing, `go vet ./...` is clean, `go test ./...` passes. |
 
-For every package: a reviewer other than the author has approved, findings and their fixes are listed in the handoff notes, and the package's own "Done when" list is met.
+For every package: the new code follows "Readable code", a reviewer other than the author has approved, findings and their fixes are listed in the handoff notes, and the package's own "Done when" list is met.
 
 ## Commits
 
