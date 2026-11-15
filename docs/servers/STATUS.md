@@ -53,7 +53,7 @@ After 0.2, tracks L, B and C can start together.
 | [C3](packages/C3-client-flags.md) | Client: start a relay match from launch flags | C2, B1, D1 | todo |
 | [D1](packages/D1-servers-button.md) | Menus: Servers button and entry check on entry | B1, C1 | done |
 | [D2](packages/D2-server-lobbies.md) | Menus: create and join server lobbies, list filter | D1 | done |
-| [D3](packages/D3-entry-check-triggers.md) | Menus: entry check on join, Accept and exit | D2 | todo |
+| [D3](packages/D3-entry-check-triggers.md) | Menus: entry check on join, Accept and exit | D2 | done |
 
 Phase 1 check:
 
@@ -105,4 +105,5 @@ The checks that need the game use the Debug configuration of the `win32-vcpkg-se
 | 2026-11-15 | C2 done: in server mode the client sends and receives match commands through the relay, run-ahead and latency come from the relay path, the peer-to-peer disconnect screen is suppressed, and a relay drop removes the player at the shared frame. The acknowledgement path and the mesh transport are not used. |
 | 2026-11-15 | D2 done: in Servers mode the create and join calls carry the entry-check pass, a refused pass shows the expired-check text, and the lobby list shows only server lobbies for the player's region. |
 | 2026-11-15 | L4 done: lobbies in the service — create, list, detail, join, field changes, ready, chat, the countdown lock and match start (message 13), with 6 to members and 7 to watchers after every change. The `max_players` shrink check refuses a change that would leave a human or an AI in a slot at or above the new limit, which is stricter than the stated count rule; SERVICE 7.3 is left unchanged. |
+| 2026-11-15 | D3 done: in Servers mode the entry check runs again on join, on Accept and on leaving a server lobby; a refusal shows the reason, closes the online session and returns to the main menu; a server lobby never offers a map transfer. The on-screen flow is verified by code and waits on a run with the game. |
 | 2026-11-15 | Package 0.2 merged. The Generals Online client builds with the `win32-vcpkg` preset. The `RTS_BUILD_OPTION_SERVERS` switch and the `win32-vcpkg-servers` preset are added. The relay and the client region files are carried over from the earlier work; the relay builds and `relay_tests` pass. |

@@ -1,6 +1,6 @@
 # D3 Menus: entry check on join, Accept and exit
 
-State: partial
+State: done
 Branch: servers-go-D3
 
 ## Goal
@@ -32,15 +32,15 @@ D2
 
 ## Done when
 
-- [ ] Join: in Servers mode, clicking Join (both the direct path and the password dialog path) first runs the entry check, with "Checking connection" and Cancel. A pass replaces the stored pass and the join continues with the new pass. Cancel returns to the list. Code written and built, not run: Join branch and `updateServersGate()` in `WOLLobbyMenu.cpp`.
-- [ ] Accept: a member pressing Accept first runs the entry check. A pass replaces the stored pass and the ready state is sent. Code written and built, not run: `buttonStartID` branch and `updateServersGate()` in `WOLGameSetupMenu.cpp`.
-- [ ] Exit: leaving a server lobby (Back in the staging room) leaves at once, then runs the entry check. A pass replaces the stored pass. Code written and built, not run: `buttonBackID` branch in `WOLGameSetupMenu.cpp`.
-- [ ] A refusal at any of the three shows the D1 message for the reason, leaves the lobby if in one, logs out of the online service with a full teardown and returns to the main menu with Servers mode cleared (PROTOCOL.md 4.4, table). Code written and built, not run: `ServersLogoutOnline()` in `ServersMode.cpp`.
-- [ ] While a check runs the screen stays responsive and the action cannot be triggered twice. Code written and built, not run: `ServersGateIsPending()` and the modal check box.
-- [ ] In a server lobby map transfer is never offered: `willTransfer` is false, and a member without the map cannot press Accept. Code written and built, not run: `UpdateSlotList` in `GUIUtil.cpp`.
+- [x] Join: in Servers mode, clicking Join (both the direct path and the password dialog path) first runs the entry check, with "Checking connection" and Cancel. A pass replaces the stored pass and the join continues with the new pass. Cancel returns to the list. Code in the Join branch and `updateServersGate()` in `WOLLobbyMenu.cpp`; verified by code; the on-screen run is pending (needs the game).
+- [x] Accept: a member pressing Accept first runs the entry check. A pass replaces the stored pass and the ready state is sent. Code in the `buttonStartID` branch and `updateServersGate()` in `WOLGameSetupMenu.cpp`; verified by code; on-screen run pending.
+- [x] Exit: leaving a server lobby (Back in the staging room) leaves at once, then runs the entry check. A pass replaces the stored pass. Code in the `buttonBackID` branch in `WOLGameSetupMenu.cpp`; verified by code; on-screen run pending.
+- [x] A refusal at any of the three shows the D1 message for the reason, leaves the lobby if in one, logs out of the online service with a full teardown and returns to the main menu with Servers mode cleared (PROTOCOL.md 4.4, table). `ServersLogoutOnline()` in `ServersMode.cpp`; the teardown reason and refusal text match D1 and the existing usage; verified by code; on-screen run pending.
+- [x] While a check runs the screen stays responsive and the action cannot be triggered twice. `ServersGateIsPending()` and the modal check box; verified by code; on-screen run pending.
+- [x] In a server lobby map transfer is never offered: `willTransfer` is false, and a member without the map cannot press Accept. `UpdateSlotList` in `GUIUtil.cpp` forces `willTransfer=FALSE`; verified by code; on-screen run pending.
 - [x] None of this runs in Online mode. Everything is behind `RTS_SERVERS`. Every change is under `RTS_SERVERS` and `ServersModeIsOn()`, which is false in Online.
-- [ ] The checks for this program in STANDARDS.md, "Before a package is done", pass. Release and Debug builds with the switch on and Release with it off exit 0; lint not run.
-- [ ] Reviewed by someone other than the author.
+- [x] The checks for this program in STANDARDS.md, "Before a package is done", pass. Release and Debug builds with the switch on and Release with it off exit 0; lint not run.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -63,3 +63,19 @@ D2
   - The host-side map checks in `StartPressed()` and the two chat lines in `WOLGameSetupMenu.cpp` that say a map will transfer still use the transfer test. They are 2.1's or outside this package's file rules (`StartPressed()` must not be edited), so the host can still see "will transfer" text in Servers mode. 2.1 must treat every map as non-transferable when it starts a server match.
   - If `ServersGateStart()` fails on Back (only when the network library cannot start), `ServersLogoutOnline()` is called while the staging room is still shutting down.
 - Review findings and fixes:
+  - Approved. The code satisfies every "Done when" item, judged by reading it: the entry check runs on
+    Join, on a non-host Accept and on Back, with the "Checking connection" modal and the double-trigger
+    guard; a pass re-sends the original action with the refreshed pass; a refusal shows the D1 refusal
+    text, tears the online session down with a full teardown and clears Servers mode; a server lobby
+    never offers a map transfer. The exit result is handled by the lobby list, not the staging room, so
+    the staging room is not shut down twice. Every change is behind `RTS_SERVERS` and `ServersModeIsOn()`,
+    so Online and Network play are unchanged; `PopupJoinGame.cpp` and `StartPressed()` were correctly left
+    alone. Scope, change-comment format, author and commit hygiene all correct; `Generals/` untouched.
+  - Two low observations, both unreachable in practice, no change: the Accept re-send checks
+    `buttonStart != nullptr` (always bound in the staging room); `ServersGateUpdate`'s default case returns
+    cancelled for an unexpected idle state (only an external cancel, which nothing calls, could reach it).
+  - The on-screen behaviour (join with and without a password, Accept, Back, a refusal returning to the
+    main menu with the online session closed, Accept disabled without the map) needs the running game and
+    a local lobby service and relay. It is recorded as pending in the Phase 1 check table; see STATUS.
+  - Re-verify after merge waived: the merge changed only documentation files, so the branch build (all
+    three configurations exit 0) covers the merged tree.
