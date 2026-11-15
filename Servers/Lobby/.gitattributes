@@ -1,0 +1,8 @@
+# The lobby service is a Go module. Go tooling (gofmt, go test) expects LF.
+# Git for Windows checks out with CRLF by default, which makes gofmt report
+# every file as unformatted. Pin these to LF so the checks are deterministic
+# on every platform.
+*.go    text eol=lf
+go.mod  text eol=lf
+go.sum  text eol=lf
+*.conf  text eol=lf
