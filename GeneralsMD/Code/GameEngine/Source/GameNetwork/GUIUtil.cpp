@@ -45,6 +45,9 @@
 #include "Common/PlayerTemplate.h"
 #include "GameNetwork/LANAPICallbacks.h" // for acceptTrueColor, etc
 #include "GameClient/ChallengeGenerals.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServersMode.h"
+#endif
 
 
 // -----------------------------------------------------------------------------
@@ -417,6 +420,12 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 	{
 		willTransfer = WouldMapTransfer(myGame->getMap());
 	}
+
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 15/11/2026 Maps are never transferred in a server lobby, so a player without the map cannot press Accept (PROTOCOL.md 5.4).
+	if (ServersModeIsOn())
+		willTransfer = FALSE;
+#endif
 
 	if (myGame)
 	{
