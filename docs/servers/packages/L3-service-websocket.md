@@ -42,7 +42,7 @@ L2
 - [x] Tests cover each point with two or more in-process clients. No test sleeps longer than 2 seconds; timeouts are configurable for tests.
 - [x] `lobbyprobe` now also connects the WebSocket for two accounts, joins room 1, exchanges a chat line and changes a name.
 - [x] The checks for this program in STANDARDS.md, "Before a package is done", pass.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -73,3 +73,22 @@ L2
   - Values chosen where the documents are silent: write timeout 10 s, 512 queued messages per client before the client is dropped, HTTP server `ReadTimeout` 30 s, `WriteTimeout` 30 s, `IdleTimeout` 60 s.
   - The coder/websocket library closes a connection when the context of a read ends. Tests therefore read in a goroutine and wait on a channel.
 - Review findings and fixes:
+  - Verified on the branch: `gofmt -l .` clean, `go vet ./...` clean, `go test ./...` passes (accounts,
+    api, config, realtime, store). `/ws` upgrades only with a valid session token; JSON is read from text
+    and binary frames and written only in text; ping 14 is answered with 15; a silent connection is
+    dropped after the idle timeout with no close frame; reconnect follows 6.2 (held place, 205, 45 s
+    expiry, release on a new session or a client close); a second connection replaces the first; rooms,
+    room chat (300-char cut, control characters stripped) and the name change (case-insensitive
+    uniqueness) all carry the keys the client reads; `GET MOTD` and `GET ServiceConfig` return every
+    section-9 field with the right defaults (all 27 keys checked); the 60 messages/second and 256 KB
+    caps are enforced before work; shared hub and room state is accessed under one lock with no socket
+    I/O held, and the name-path database write is off the lock and rate-bounded. The exact
+    `github.com/coder/websocket` library named in SERVICE 1 is used. Scope, author and commit hygiene
+    correct.
+  - Two low notes, neither blocking:
+    1. A client disconnected for flooding or an over-size frame holds its place for the full 45 s instead
+       of releasing it at once like a clean client close. Harmless (reclaimed on hold expiry, the
+       logged-out client cannot re-enter). The flood/over-size paths could release the place immediately;
+       left for a later hardening pass.
+    2. A handoff note placed `TestWebSocketSurvivesLongerThanTheServerReadTimeout` in `cmd/lobby/main.go`;
+       it is actually in `internal/api/ws_test.go`. Documentation-only, no code effect.
