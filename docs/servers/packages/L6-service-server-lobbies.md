@@ -42,7 +42,7 @@ L5
 - [x] Tests sign passes with a key pair generated in the test. They cover: good pass, bad signature, expired, wrong region, wrong fingerprints, wrong length, non-hexadecimal, create and join with and without a pass, token delivery to three members, and a join after the session was stored.
 - [x] `lobbyprobe` gets a mode that signs its own passes with a key file given on the command line and runs the server lobby path end to end, including field 19 and reading its own token from message 13.
 - [x] The checks for this program in STANDARDS.md, "Before a package is done", pass.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -60,3 +60,23 @@ L5
   - Host `has_map` is not required for ready, since the host is always ready (SERVICE.md 7.1).
   - Verified live: built the service and `lobbyprobe`, generated a key pair, ran `lobbyprobe --server-key` against the running service: every step ok, exit 0. The service refused to start with the `.pub` file missing, with a message naming the region and file.
 - Review findings and fixes:
+  - Approved. The pass-verification core was checked byte-for-byte against the relay: the field offsets
+    (version@0, region@2, exe_crc@8, ini_crc@12, issued@20, expires@24, signature@36 over the first 36
+    bytes, little-endian), the Ed25519 scheme and the key-file format (32-byte public hex, 64-byte secret)
+    all match the relay's `pass.cpp`/`region_keys.cpp`, so a pass the relay signs verifies here and a
+    forged or wrong-region/expired/wrong-fingerprint pass is refused; the 100-byte pass is bounds-fixed
+    before any field is read and a nil verifier refuses. `PUT Lobbies` with `server_mode` requires a valid
+    pass matching exe_crc/ini_crc and sets `LobbyType` 2 and the region; `PUT Lobby/{id}` of a server lobby
+    requires a valid pass for the region, else 403, checked after the lobby exists; server lobbies get empty
+    TURN credentials, never send 17/18 and drop 12/19; message 26 is answered at once with 28 and
+    `mesh_complete` true; a member without the map cannot ready; field 19 is validated per SERVICE 10,
+    cleared on any join or leave and never shown; message 13 is ignored without a stored session, else each
+    member gets its own session, slot and token with the host's token empty; Online lobbies are unchanged.
+    `gofmt`/`go vet`/`go test` all clean. Scope, author and commit hygiene correct.
+  - Two low notes, no change: an idempotent re-join by an existing member returns early without
+    re-checking the pass (the member was already admitted with a valid pass and nothing changes — not a
+    hole); the example `lobby.conf` now makes the service refuse to start until the region key file is
+    generated, which is the required behaviour.
+  - The live interop of this pass check against a relay-signed pass is exercised by the L+D menu-flow phase
+    gate (create/join a server lobby), which needs a person at the menus; it is verified here by format and
+    offset analysis (standard Ed25519), pending that live run.
