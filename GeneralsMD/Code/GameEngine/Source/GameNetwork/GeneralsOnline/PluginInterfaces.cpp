@@ -106,10 +106,6 @@ void AnticheatPlugInterface::LoadPlugin(const char* szPluginName)
 
     NetworkLog(ELogVerbosity::LOG_RELEASE, "[AC] Attempting to load plugin from %s", szPluginName);
 
-#if defined(_DEBUG)
-    szPluginName = "F:\\Gen\\eac_module\\build\\Debug\\easyanticheat.dll";
-#endif
-
     m_bPluginLoadFailed = false;
     g_hACPluginModule = LoadLibraryA(szPluginName);
 

@@ -4,6 +4,7 @@
 #include "GameNetwork/GeneralsOnline/OnlineServices_Init.h"
 #include "GameNetwork/GeneralsOnline/OnlineServices_LobbyInterface.h"
 #include "GameNetwork/GeneralsOnline/OnlineServices_RoomsInterface.h"
+#include "GameNetwork/GeneralsOnline/ServiceHosts.h"
 #include "GameNetwork/GameSpyOverlay.h"
 
 #include <chrono>
@@ -23,17 +24,6 @@ namespace
 	void LeaveLoginScreen()
 	{
 		TheShell->pop();
-	}
-
-	void OpenDiscord()
-	{
-		ShellExecuteA(nullptr, "open", "https://discord.playgenerals.online", nullptr, nullptr, SW_SHOWNORMAL);
-	}
-
-	void OpenDiscordFromLogin()
-	{
-		OpenDiscord();
-		LeaveLoginScreen();
 	}
 
 	std::wstring GetNormalizedReason(const std::string& reason)
@@ -66,30 +56,22 @@ namespace
 		EModerationDialogContext context)
 	{
 		AppendReason(message, reason);
-		message += L"\n\nVisit Discord for more information or support.";
 
-		GameWinMsgBoxFunc discordCallback = OpenDiscord;
+		// TheSuperHackers @feature Kayoti 15/11/2026 The dialog has only a Close button: it no longer links to a Discord page.
 		GameWinMsgBoxFunc closeCallback = nullptr;
 		if (context == EModerationDialogContext::LOGIN)
 		{
-			discordCallback = OpenDiscordFromLogin;
 			closeCallback = LeaveLoginScreen;
 		}
 
-		GSMessageBoxOkCancelWithLabels(
-			title,
-			UnicodeString(message.c_str()),
-			UnicodeString(L"Discord"),
-			UnicodeString(L"Close"),
-			discordCallback,
-			closeCallback);
+		GSMessageBoxOk(title, UnicodeString(message.c_str()), closeCallback);
 	}
 
 	void ShowBanDialog(const std::string& reason, EModerationDialogContext context)
 	{
 		ShowModerationDialog(
 			UnicodeString(L"Banned"),
-			L"You have been banned from Generals Online.",
+			std::wstring(L"You have been banned from ") + ServiceHosts::DISPLAY_NAME_WIDE + L".",
 			reason,
 			context);
 	}
@@ -98,7 +80,7 @@ namespace
 	{
 		ShowModerationDialog(
 			UnicodeString(L"Kicked"),
-			L"You have been kicked from Generals Online.",
+			std::wstring(L"You have been kicked from ") + ServiceHosts::DISPLAY_NAME_WIDE + L".",
 			reason,
 			EModerationDialogContext::ACTIVE_SESSION);
 	}

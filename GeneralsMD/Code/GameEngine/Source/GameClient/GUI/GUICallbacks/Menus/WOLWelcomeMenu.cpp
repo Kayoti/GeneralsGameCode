@@ -68,6 +68,7 @@
 #include "GameNetwork/GameSpy/MainMenuUtils.h"
 #include "GameNetwork/WOLBrowser/WebBrowser.h"
 #include "GameNetwork/GeneralsOnline/NGMP_interfaces.h"
+#include "GameNetwork/GeneralsOnline/ServiceHosts.h"
 
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
 static Bool isShuttingDown = FALSE;
@@ -552,7 +553,7 @@ void WOLWelcomeMenuInit( WindowLayout *layout, void *userData )
 		NGMP_OnlineServices_AuthInterface* pAuthInterface = NGMP_OnlineServicesManager::GetInterface<NGMP_OnlineServices_AuthInterface>();
 		if (pAuthInterface != nullptr)
 		{
-			title.format(L"Welcome to Generals Online, %s", pAuthInterface->GetDisplayNameW().c_str());
+			title.format(L"Welcome to %ls, %s", ServiceHosts::DISPLAY_NAME_WIDE, pAuthInterface->GetDisplayNameW().c_str());
 			GadgetStaticTextSetText(staticTextTitle, title);
 		}
 	}

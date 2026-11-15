@@ -203,16 +203,7 @@ void Intro::doGeneralsOnlineLogo()
         settings.push_back(setting);
     }
 
-	// Website
-	DisplaySetting setting;
-	setting.font = "Consolas";
-	setting.text = L"www.playgenerals.online";
-	setting.sizeY = 16;
-	setting.centerOffsetY = centerOffsetY;
-	centerOffsetY += setting.sizeY * resolutionScale * 2;
-	setting.bold = false;
-	setting.centered = true;
-	settings.push_back(setting);
+	// TheSuperHackers @feature Kayoti 15/11/2026 The line naming the previous service's web site is gone.
 
     {
         // globe image

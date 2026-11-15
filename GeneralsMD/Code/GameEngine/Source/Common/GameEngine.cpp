@@ -113,6 +113,7 @@
 // GENERALS ONLINE
 #include "../OnlineServices_Init.h"
 #include "GameNetwork/GeneralsOnline/DiscordRichPresence.h"
+#include "GameNetwork/GeneralsOnline/ServiceHosts.h"
 #include "GameNetwork/GeneralsOnline/OnlineServices_LobbyInterface.h"
 #include "GameNetwork/GameSpyOverlay.h"
 #include <chrono>
@@ -135,17 +136,17 @@ void TearDownGeneralsOnline()
 		if (teardownReason == EGOTearDownReason::USER_LOGOUT)
 		{
 			title = L"Logged Out";
-			body = L"You are now logged out of GeneralsOnline.";
+			body.format(L"You are now logged out of %ls.", ServiceHosts::DISPLAY_NAME_WIDE);
 		}
 		else if (teardownReason == EGOTearDownReason::LOST_CONNECTION)
 		{
 			title = TheGameText->fetch("GUI:GSErrorTitle");
-			body = L"Your connection to the Generals Online servers was lost.";
+			body.format(L"Your connection to the %ls servers was lost.", ServiceHosts::DISPLAY_NAME_WIDE);
 		}
         else if (teardownReason == EGOTearDownReason::AUTH_FAILED)
         {
             title = TheGameText->fetch("GUI:GSErrorTitle");
-            body = L"Authentication with the Generals Online servers failed.";
+            body.format(L"Authentication with the %ls servers failed.", ServiceHosts::DISPLAY_NAME_WIDE);
         }
 		else if (teardownReason == EGOTearDownReason::MIDDLEWARE_LOGIN_FAILED)
 		{
@@ -366,8 +367,7 @@ GameEngine::~GameEngine()
 #ifdef PERF_TIMERS
 	PerfGather::termPerfDump();
 #endif
-	// Kill sentry
-	NGMP_OnlineServicesManager::ShutdownSentry();}
+}
 
 //-------------------------------------------------------------------------------------------------
 
@@ -518,8 +518,8 @@ void GameEngine::init()
 		initSubsystem(TheWritableGlobalData, "TheWritableGlobalData", TheWritableGlobalData, &xferCRC, "Data\\INI\\Default\\GameData", "Data\\INI\\GameData");
 		TheWritableGlobalData->parseCustomDefinition();
 
-		// Init sentry ASAP to catch early crashes
-		NGMP_OnlineServicesManager::InitSentry();
+		// TheSuperHackers @feature Kayoti 15/11/2026 Crash reporting is never started. Only libcurl's global state is set up here.
+		NGMP_OnlineServicesManager::InitCurl();
 
 #ifdef DUMP_PERF_STATS///////////////////////////////////////////////////////////////////////////
 		GetPrecisionTimer(&endTime64);//////////////////////////////////////////////////////////////////
@@ -839,8 +839,7 @@ void GameEngine::init()
 
 	HideControlBar();
 
-	m_discordRichPresence = new GeneralsOnlineDiscordRPC();
-	m_discordRichPresence->Initialize();
+	// TheSuperHackers @feature Kayoti 15/11/2026 Discord presence is never started; m_discordRichPresence stays null.
 }
 
 /** -----------------------------------------------------------------------------------------------

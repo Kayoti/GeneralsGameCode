@@ -314,10 +314,8 @@ void NGMP_OnlineServices_AuthInterface::BeginLogin()
 		// login
 		std::map<std::string, std::string> mapHeaders;
 
+		// TheSuperHackers @feature Kayoti 15/11/2026 Hardware identifiers are never sent.
 		nlohmann::json j;
-		j["machine_guid"] = GetMachineGuid();
-		j["mac_addr"] = GetPrimaryMacAddress();
-		j["vol_serial"] = GetVolumeSerial();
 		j["exe_crc"] = getGameExeCRC();
 		j["ini_crc"] = TheGlobalData->m_iniCRC;
 		std::string strPostData = j.dump();
@@ -433,14 +431,9 @@ void NGMP_OnlineServices_AuthInterface::DoFullLoginFlow()
 						m_strCode = authResp.login_code;
 						NetworkLog(ELogVerbosity::LOG_DEBUG, "Login Code is %s", m_strCode.c_str());
 
-#if defined(USE_TEST_ENV)
-                        std::string strURI = std::format("https://www.playgenerals.online/login/?gamecode={}&env=test", m_strCode.c_str());
-#else
-                        std::string strURI = std::format("https://www.playgenerals.online/login/?gamecode={}", m_strCode.c_str());
-#endif
-
                         ClearGSMessageBoxes();
-                        GSMessageBoxCancel(UnicodeString(L"Logging In"), UnicodeString(L"Please continue in your web browser"), []()
+                        // TheSuperHackers @feature Kayoti 15/11/2026 The login code is confirmed by the service on the next poll; no web page is opened.
+                        GSMessageBoxCancel(UnicodeString(L"Logging In"), UnicodeString(L"Logging in"), []()
                             {
                                 if (NGMP_OnlineServicesManager::GetInstance() != nullptr)
                                 {
@@ -453,10 +446,6 @@ void NGMP_OnlineServices_AuthInterface::DoFullLoginFlow()
                                     pAuthInterface->OnLoginComplete(ELoginResult::UserCancelled, "");
                                 }
                             });
-
-#if !defined(_DEBUG) || defined(USE_TEST_ENV) || defined(USE_DEBUG_ON_LIVE_SERVER)
-                        ShellExecuteA(NULL, "open", strURI.c_str(), NULL, NULL, SW_SHOWNORMAL);
-#endif
                     }
                     else
                     {
@@ -515,9 +504,6 @@ void NGMP_OnlineServices_AuthInterface::Tick()
 			nlohmann::json j;
 			j["code"] = m_strCode.c_str();
 			j["client_id"] = GENERALS_ONLINE_CLIENT_ID;
-            j["machine_guid"] = GetMachineGuid();
-            j["mac_addr"] = GetPrimaryMacAddress();
-            j["vol_serial"] = GetVolumeSerial();
             j["exe_crc"] = getGameExeCRC();
             j["ini_crc"] = TheGlobalData->m_iniCRC;
 			std::string strPostData = j.dump();

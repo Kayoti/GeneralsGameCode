@@ -1,6 +1,7 @@
 #include "GameNetwork/GeneralsOnline/NetworkMesh.h"
 #include "GameNetwork/GeneralsOnline/NGMP_include.h"
 #include "GameNetwork/GeneralsOnline/NGMP_interfaces.h"
+#include "GameNetwork/GeneralsOnline/ServiceHosts.h"
 
 #include <ws2ipdef.h>
 #include "GameNetwork/NetworkDefs.h"
@@ -630,7 +631,7 @@ bool NetworkMeshLibrary::EnsureInitialized(int64_t userID)
 
 	// Every STUN entry must resolve to a distinct address, or the native ICE client retries
 	// duplicates forever.
-	SteamNetworkingUtils()->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_STUN_ServerList, "stun:stun.playgenerals.online:53,stun:stun.playgenerals.online:3478,stun:stun.l.google.com:19302");
+	SteamNetworkingUtils()->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_STUN_ServerList, ServiceHosts::STUN_SERVER_LIST);
 
 
 	ESteamNetworkingSocketsDebugOutputType logType =
@@ -708,12 +709,13 @@ NetworkMesh::NetworkMesh()
 
 	// comma-separated; no "?transport=udp" suffix, the native ICE client takes everything after
 	// the host as the port
-	m_strTurnServerList = "turn:turn.playgenerals.online:53,turn:turn.playgenerals.online:3478";
+	m_strTurnServerList = ServiceHosts::TURN_SERVER_LIST;
 
 	m_strTurnUsername = pLobbyInterface->GetLobbyTurnUsername();
 	m_strTurnToken = pLobbyInterface->GetLobbyTurnToken();
-	m_strTurnUsernameString = std::format("{},{}", m_strTurnUsername.c_str(), m_strTurnUsername.c_str());
-	m_strTurnTokenString = std::format("{},{}", m_strTurnToken.c_str(), m_strTurnToken.c_str());
+	// TheSuperHackers @feature Kayoti 15/11/2026 The server list has one entry, so each credential list has one value.
+	m_strTurnUsernameString = m_strTurnUsername;
+	m_strTurnTokenString = m_strTurnToken;
 
 	ServiceConfig& serviceConf = pOnlineServicesMgr->GetServiceConfig();
 	m_iceEnable = (g_bForceRelay || serviceConf.relay_all_traffic)
@@ -1034,8 +1036,8 @@ void NetworkMesh::SetTurnCredentials(const std::string& strUsername, const std::
 
 		m_strTurnUsername = strUsername;
 		m_strTurnToken = strToken;
-		m_strTurnUsernameString = std::format("{},{}", m_strTurnUsername.c_str(), m_strTurnUsername.c_str());
-		m_strTurnTokenString = std::format("{},{}", m_strTurnToken.c_str(), m_strTurnToken.c_str());
+		m_strTurnUsernameString = m_strTurnUsername;
+		m_strTurnTokenString = m_strTurnToken;
 
 		// incoming connections use the listen socket's TURN settings
 		if (m_hListenSock != k_HSteamListenSocket_Invalid)

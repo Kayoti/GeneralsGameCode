@@ -35,6 +35,15 @@ cmake --build build/win32-vcpkg-servers --config Debug --target z_generals
 - The Debug configuration of the Servers preset is the one used by the phase checks that need the game.
 - Build folders are under `build/` and are ignored by git.
 
+## Where the client connects
+
+All addresses are in `GeneralsMD/Code/GameEngine/Include/GameNetwork/GeneralsOnline/ServiceHosts.h` (package B1). This applies to every build, with the Servers switch on or off.
+
+- A Debug build calls `http://127.0.0.1:9000/env/dev/contract/1/<Endpoint>`, so a local lobby service on port 9000 is all it needs. Its STUN and TURN lists point at `127.0.0.1:3478`.
+- A Release build calls the host in `ServiceHosts::API_BASE_URL` (`https://lobby.example.net` until the real host is supplied) with `/env/prod/contract/1/<Endpoint>`.
+- The "alternative endpoint" setting in `settings.json` no longer changes any address.
+- Login never opens a web browser. The client never reports crashes, never starts Discord presence, never loads an anti-cheat plugin and ignores an update offer from the version check.
+
 ## Build the relay
 
 The relay is a standalone x64 CMake project under `Servers/Relay`. It does not use the game build. It fetches ENet, libsodium and libmaxminddb on the first configure, so it needs internet access. Run in a `cmd` session from the repository root:

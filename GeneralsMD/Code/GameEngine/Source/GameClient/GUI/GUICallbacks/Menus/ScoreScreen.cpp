@@ -659,25 +659,6 @@ WindowMsgHandledType ScoreScreenSystem( GameWindow *window, UnsignedInt msg,
 
 						}
 					}
-					else if (screenType == SCORESCREEN_INTERNET)
-					{
-						NGMP_OnlineServices_LobbyInterface* pLobbyInterface = NGMP_OnlineServicesManager::GetInterface<NGMP_OnlineServices_LobbyInterface>();
-						if (pLobbyInterface != nullptr)
-						{
-							uint64_t currentMatchID = pLobbyInterface->GetCurrentMatchID();
-
-							if (currentMatchID != 0)
-							{
-								AsciiString strMatchURL;
-#if defined(USE_TEST_ENV)
-								strMatchURL.format("https://www.playgenerals.online/viewmatch?match=%" PRIu64 "&env=test", currentMatchID);
-#else
-								strMatchURL.format("https://strata.gamereplays.org/zh/match/%" PRIu64, currentMatchID);
-#endif
-								ShellExecuteA(NULL, "open", strMatchURL.str(), NULL, NULL, SW_SHOWNORMAL);
-							}
-						}
-					}
 				}
 			}
 			else if ( controlID == buttonBuddiesID )	
@@ -1205,8 +1186,6 @@ void initInternetMultiPlayer(void)
  			UnicodeString strMatchID;
  			strMatchID.format(L"\nMatch ID: %" PRIu64, lobby.match_id);
  
- 			UnicodeString strMatchURL;
-
 			if (lobby.match_id == 0) // probably AI or < 2 humans
 			{
 				buttonContinue->winHide(TRUE);
@@ -1215,18 +1194,10 @@ void initInternetMultiPlayer(void)
 			}
 			else
 			{
-				buttonContinue->winHide(FALSE);
-
-#if defined(USE_TEST_ENV)
-				strMatchURL.format(L"\nView match data, participants, replays, anti-cheat data: https://www.playgenerals.online/viewmatch?match=%" PRIu64 "&env=test", lobby.match_id);
-#else
-				strMatchURL.format(L"\nView match data, participants, replays, anti-cheat data: https://strata.gamereplays.org/zh/match/%" PRIu64, lobby.match_id);
-#endif
-
-				buttonContinue->winSetText(UnicodeString(L"VIEW MATCH ONLINE"));
+				// TheSuperHackers @feature Kayoti 15/11/2026 The "view match online" button is hidden: there is no match page to open.
+				buttonContinue->winHide(TRUE);
 
 				GadgetListBoxAddEntryText(listboxAcademyWindowScoreScreen, strMatchID, GameSpyColor[GSCOLOR_DEFAULT], -1);
-				GadgetListBoxAddEntryText(listboxAcademyWindowScoreScreen, strMatchURL, GameSpyColor[GSCOLOR_DEFAULT], -1);
 			}
 
 

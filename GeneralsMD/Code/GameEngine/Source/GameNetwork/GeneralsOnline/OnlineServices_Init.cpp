@@ -1,6 +1,7 @@
 #include "GameNetwork/GeneralsOnline/NGMP_interfaces.h"
 #include "GameNetwork/GeneralsOnline/NetworkMesh.h"
 #include "GameNetwork/GeneralsOnline/HTTP/HTTPManager.h"
+#include "GameNetwork/GeneralsOnline/ServiceHosts.h"
 #include "../json.hpp"
 #include "GameClient/MessageBox.h"
 #include "Common/FileSystem.h"
@@ -179,25 +180,18 @@ NGMP_OnlineServicesManager::NGMP_OnlineServicesManager()
 
 std::string NGMP_OnlineServicesManager::GetAPIEndpoint(const char* szEndpoint)
 {
+	// TheSuperHackers @feature Kayoti 15/11/2026 Builds every address from the one host in ServiceHosts.h. Only the environment name in the path varies.
+	const char* szEnvironment = "prod";
 	if (g_Environment == EEnvironment::DEV)
 	{
-		return std::format("https://localhost:9000/env/dev/contract/1/{}", szEndpoint);
+		szEnvironment = "dev";
 	}
 	else if (g_Environment == EEnvironment::TEST)
 	{
-		return std::format("https://api.playgenerals.online:2087/env/test/contract/1/{}", szEndpoint);
+		szEnvironment = "test";
 	}
-	else // PROD
-	{
-		if (NGMP_OnlineServicesManager::Settings.Network_UseAlternativeEndpoint())
-		{
-			return std::format("https://api-ru.playgenerals.online/env/prod/contract/1/{}", szEndpoint);
-		}
-		else
-		{
-			return std::format("https://api.playgenerals.online/env/prod/contract/1/{}", szEndpoint);
-		}
-	}
+
+	return std::format("{}/env/{}/contract/1/{}", ServiceHosts::API_BASE_URL, szEnvironment, szEndpoint);
 }
 
 void NGMP_OnlineServicesManager::AttemptLoadSteam()
@@ -421,23 +415,9 @@ void NGMP_OnlineServicesManager::StartVersionCheck(std::function<void(bool bSucc
 				}
 				else if (authResp.result == EVersionCheckResponseResult::NEEDS_UPDATE)
 				{
-					NetworkLog(ELogVerbosity::LOG_RELEASE, "VERSION CHECK: Needs Update");
-
-					// the name becomes a local path, so it must be a bare file name
-					const std::string& strName = authResp.patcher_name;
-					if (strName.empty() || strName.find_first_of("/\\:") != std::string::npos || strName.find("..") != std::string::npos)
-					{
-						NetworkLog(ELogVerbosity::LOG_RELEASE, "VERSION CHECK: Rejected invalid patcher name");
-						fnCallback(false, false);
-						return;
-					}
-
-					// cache the data
-					m_patcher_name = authResp.patcher_name;
-					m_patcher_path = authResp.patcher_path;
-					m_patcher_size = authResp.patcher_size;
-
-					fnCallback(true, true);
+					// TheSuperHackers @feature Kayoti 15/11/2026 The client never updates itself, so an update offer is ignored: nothing is cached, downloaded or run.
+					NetworkLog(ELogVerbosity::LOG_RELEASE, "VERSION CHECK: Update offered, ignored");
+					fnCallback(true, false);
 				}
 				else
 				{
@@ -481,7 +461,6 @@ void NGMP_OnlineServicesManager::ContinueUpdate()
 							{
 								TheGameEngine->setQuitting(TRUE);
 							});
-						ShellExecuteA(NULL, "open", "https://www.playgenerals.online/updatefailed", NULL, NULL, SW_SHOWNORMAL);
 					};
 
 				if (statusCode != 200)
@@ -805,7 +784,6 @@ void NGMP_OnlineServicesManager::LaunchPatcher()
 			{
 				TheGameEngine->setQuitting(TRUE);
 			});
-		ShellExecuteA(NULL, "open", "https://www.playgenerals.online/updatefailed", NULL, NULL, SW_SHOWNORMAL);
 	}
 }
 
@@ -865,8 +843,7 @@ void NGMP_OnlineServicesManager::OnLogin(ELoginResult loginResult, const char* s
 		// connect to WS
 		m_pWebSocket = std::make_shared<WebSocket>();
 
-		// TODO_NGMP: This should come from the service, if the service was russia-aware
-		std::string strWebsocketAddr = NGMP_OnlineServicesManager::Settings.Network_UseAlternativeEndpoint() ? "wss://api-ru.playgenerals.online/ws" : std::string(szWSAddr);
+		std::string strWebsocketAddr = std::string(szWSAddr);
 
         m_pWebSocket->Connect(strWebsocketAddr.c_str(), false, [=]()
             {
@@ -902,14 +879,7 @@ void NGMP_OnlineServicesManager::Init()
 	m_pHTTPManager = new HTTPManager();
 	m_pHTTPManager->Initialize();
 
-    std::string strPlugin = NGMP_OnlineServicesManager::Settings.GetAnticheatPlugin();
-
-	// Empty name means no anticheat plugin configured; skip loading.
-	if (!strPlugin.empty())
-	{
-		std::string pluginPath = std::format("plugins/{}/{}.dll", strPlugin.c_str(), strPlugin.c_str());
-		AnticheatPlugInterface::LoadPlugin(pluginPath.c_str());
-	}
+	// TheSuperHackers @feature Kayoti 15/11/2026 No anti-cheat plugin is ever loaded, whatever the settings file names.
 
 	// TODO_NGMP: Better location
 	// TODO_NGMP: Get all of this from the service
@@ -1069,88 +1039,10 @@ void NGMP_OnlineServicesManager::Tick()
 	NetworkMeshLibrary::Tick();
 }
 
-void NGMP_OnlineServicesManager::InitSentry()
+void NGMP_OnlineServicesManager::InitCurl()
 {
-	// Initialize libcurl global state here, before any plugins (e.g. EasyAntiCheat) are loaded.
-	// This ensures libcurl's internal mutexes are fully initialized before the EAC plugin
-	// attempts to use them, preventing an access violation in mtx_do_lock on null mutex state.
+	// Initialize libcurl global state once at start-up, before any request or WebSocket is created.
 	curl_global_init(CURL_GLOBAL_DEFAULT);
-
-#if !_DEBUG
-	// game paths are in the process code page, sentry's char* API wants UTF-8, so hand it the wide path
-	std::wstring strDumpPath;
-	const AsciiString& strUserDataPath = TheGlobalData->getPath_UserData();
-	const int wideLen = MultiByteToWideChar(CP_ACP, 0, strUserDataPath.str(), -1, nullptr, 0);
-	if (!strUserDataPath.isEmpty() && wideLen > 1)
-	{
-		std::wstring strUserDataPathW(wideLen - 1, L'\0');
-		MultiByteToWideChar(CP_ACP, 0, strUserDataPath.str(), -1, strUserDataPathW.data(), wideLen);
-		strDumpPath = strUserDataPathW + L"GeneralsOnlineCrashData\\";
-
-		std::error_code ec;
-		std::filesystem::create_directories(strDumpPath, ec);
-	}
-
-	sentry_options_t* options = sentry_options_new();
-
-	sentry_options_set_dsn(options, "https://61750bebd112d279bcc286d617819269@o4509316925554688.ingest.us.sentry.io/4509316927586304");
-	if (!strDumpPath.empty())
-	{
-		sentry_options_set_database_pathw(options, strDumpPath.c_str());
-	}
-
-	std::string strVersionStr = std::format("generalsonline-client@{}", GENERALS_ONLINE_VERSION_STRING);
-	sentry_options_set_release(options, strVersionStr.c_str());
-
-#if defined(USE_TEST_ENV)
-	sentry_options_set_environment(options, "test");
-#else
-	sentry_options_set_environment(options, "production");
-#endif
-
-	// local player info
-	int64_t userID = -1;
-	std::string strDisplayname = "Unknown";
-	NGMP_OnlineServices_AuthInterface* pAuthInterface = NGMP_OnlineServicesManager::GetInterface<NGMP_OnlineServices_AuthInterface>();
-	if (pAuthInterface != nullptr)
-	{
-		userID = pAuthInterface->GetUserID();
-		strDisplayname = pAuthInterface->GetDisplayName();
-	}
-	std::string strUserID = std::format("{}", userID);
-
-
-	sentry_value_t userinfoVal = sentry_value_new_object();
-	sentry_value_set_by_key(userinfoVal, "user_id", sentry_value_new_string(strUserID.c_str()));
-	sentry_value_set_by_key(userinfoVal, "user_displayname", sentry_value_new_string(strDisplayname.c_str()));
-	sentry_set_context("user_info", userinfoVal);
-
-	sentry_set_tag("user_id", strUserID.c_str());
-	sentry_set_tag("user_displayname", strDisplayname.c_str());
-
-#if _DEBUG
-	sentry_options_set_debug(options, 1);
-	sentry_options_set_logger_level(options, SENTRY_LEVEL_DEBUG);
-
-	sentry_options_set_logger(options,	[](sentry_level_t level, const char* message, va_list args, void* userdata)
-	{
-			char buffer[1024];
-			va_start(args, message);
-			vsnprintf(buffer, 1024, message, args);
-			buffer[1024 - 1] = 0;
-			va_end(args);
-
-			NetworkLog(ELogVerbosity::LOG_RELEASE, "[Sentry] %s", buffer);
-	}, nullptr);
-#endif
-
-	sentry_init(options);
-#endif
-}
-
-void NGMP_OnlineServicesManager::ShutdownSentry()
-{
-	sentry_close();
 }
 
 
