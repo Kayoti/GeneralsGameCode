@@ -71,7 +71,7 @@ The checks that need the game use the Debug configuration of the `win32-vcpkg-se
 
 | Package | Title | Depends on | State |
 |---|---|---|---|
-| [2.1](packages/2.1-match-start.md) | Match start from a server lobby | C2, C3, D3, L6 | todo |
+| [2.1](packages/2.1-match-start.md) | Match start from a server lobby | C2, C3, D3, L6 | done |
 | 2.2 | Match end returns players to the lobby list | 2.1 | todo, package file not written |
 
 ## Phase 3
@@ -109,4 +109,5 @@ The checks that need the game use the Debug configuration of the `win32-vcpkg-se
 | 2026-11-15 | L5 done: the service issues TURN credentials in the lobby answers, pairs players after a join and relays their signalling, and runs the connectivity check before a match starts. |
 | 2026-11-15 | C3 done: the launch flags start a relay match without the lobby service — the host runs the entry check, sends `CREATE` and logs the join tokens, a joiner sends `JOIN`, and both start with server mode set and the relay link attached. Server mode is set before the transport is created. |
 | 2026-11-15 | L6 done: the service hosts server lobbies — it verifies the entry-check pass against the region keys, creates and joins `LobbyType` 2 lobbies behind a valid pass, skips the player-to-player signalling for them, and stores the per-player session tokens handed out at match start. |
+| 2026-11-15 | 2.1 done: a server-lobby host starts a relay match — on the countdown end the host renews the pass, creates the session, posts the server session and tokens, and sends the start message, and each member joins the relay with its own token; the client launches in server mode with the relay link, with no player-to-player mesh. All Phase 1 and Phase 2 packages are now merged. The two-instance live run through the menus is a Phase 2 check that needs the game and a person. |
 | 2026-11-15 | Package 0.2 merged. The Generals Online client builds with the `win32-vcpkg` preset. The `RTS_BUILD_OPTION_SERVERS` switch and the `win32-vcpkg-servers` preset are added. The relay and the client region files are carried over from the earlier work; the relay builds and `relay_tests` pass. |
