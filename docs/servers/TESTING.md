@@ -76,6 +76,18 @@ curl http://127.0.0.1:9000/healthz
 
 It answers `ok`. Calls are at `/env/{prod,test,dev}/contract/1/{Endpoint}`. Each request is logged with its method, path, status, duration and the caller's address with the last part hidden.
 
+### Check the login calls with lobbyprobe
+
+`Servers/Lobby/tools/lobbyprobe` makes the login calls the way the game client does: version check, login code, check login, refresh, and login with token. It prints one line per step and exits with status 1 at the first step that fails. It never prints a token. With the service above running:
+
+```
+cd Servers/Lobby
+go build -o <build dir>/lobbyprobe.exe ./tools/lobbyprobe
+<build dir>/lobbyprobe.exe --url http://127.0.0.1:9000 --env dev
+```
+
+A passing run prints five lines, `VersionCheck: ok, no update` to `LoginWithToken: ok, user id <id>`, and exits with 0. Each run creates a new account, so user ids go up by one per run. Stop the service and run it again to see the failure message and status 1.
+
 ## Flags (restored by package C3)
 
 All flags are read at engine start. The flag names are not case sensitive.

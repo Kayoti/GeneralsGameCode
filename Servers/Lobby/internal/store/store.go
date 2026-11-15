@@ -26,6 +26,15 @@ var schemaStatements = []string{
 	`CREATE TABLE IF NOT EXISTS schema_version (
 		version INTEGER NOT NULL
 	)`,
+	`CREATE TABLE IF NOT EXISTS accounts (
+		user_id INTEGER PRIMARY KEY,
+		display_name TEXT NOT NULL
+	)`,
+	// One refresh token per account. Only its SHA-256 is stored (SERVICE.md section 4).
+	`CREATE TABLE IF NOT EXISTS refresh_tokens (
+		user_id INTEGER PRIMARY KEY REFERENCES accounts(user_id),
+		token_hash TEXT NOT NULL UNIQUE
+	)`,
 }
 
 // Store is an open database.
