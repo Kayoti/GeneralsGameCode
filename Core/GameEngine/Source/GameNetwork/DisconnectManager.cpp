@@ -105,6 +105,11 @@ void DisconnectManager::update(ConnectionManager *conMgr) {
 		time_t curTime = timeGetTime();
 		if ((curTime - m_lastFrameTime) > TheGlobalData->m_networkDisconnectTime) {
 			if (m_disconnectState == DISCONNECTSTATETYPE_SCREENOFF) {
+#ifdef RTS_SERVERS
+				// TheSuperHackers @feature Kayoti 15/11/2026 In server mode the relay drops a stalled player, so the
+				// disconnect/vote screen must never turn on; the local client just keeps waiting for the relay.
+				if (conMgr->isServerMode() == FALSE)
+#endif
 				turnOnScreen(conMgr);
 			}
 			sendKeepAlive(conMgr);
@@ -198,6 +203,13 @@ Int DisconnectManager::getPingsReceived()
 
 
 void DisconnectManager::updateDisconnectStatus(ConnectionManager *conMgr) {
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 15/11/2026 In server mode the disconnect screen never votes or removes a
+	// player. A stuck player is dropped by the relay. The screen may still show that the game is waiting.
+	if (conMgr->isServerMode()) {
+		return;
+	}
+#endif
 	for (Int i = 0; i < MAX_SLOTS; ++i) {
 		if (conMgr->isPlayerConnected(i)) {
 			Int slot = translatedSlotPosition(i, conMgr->getLocalPlayerID());

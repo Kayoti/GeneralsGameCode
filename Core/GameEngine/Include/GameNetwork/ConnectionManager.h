@@ -40,6 +40,9 @@
 
 class GameInfo;
 class NetCommandWrapperList;
+#ifdef RTS_SERVERS
+class ServerLink;
+#endif
 
 typedef std::map<UnsignedShort, AsciiString> FileCommandMap;
 typedef std::map<UnsignedShort, UnsignedByte> FileMaskMap;
@@ -76,6 +79,13 @@ public:
 	void attachTransport(Transport *transport);
 
 	void parseUserList(const GameInfo *game);
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 15/11/2026 Adds the server mode flag. It is set before parseUserList and is off by default.
+	void setServerMode(Bool serverMode) { m_serverMode = serverMode; }
+	Bool isServerMode() const { return m_serverMode; }
+	// TheSuperHackers @feature Kayoti 15/11/2026 Hands the already-connected relay link to the connection manager. The link is owned by the caller.
+	void attachServerLink(ServerLink *link) { m_serverLink = link; }
+#endif
 	void sendChat(UnicodeString text, Int playerMask, UnsignedInt executionFrame);
 	void sendDisconnectChat(UnicodeString text);
 	void sendLocalCommand(NetCommandMsg *msg, UnsignedByte relay = 0xff);		///< Send command to the players specified in the relay, goes through packet router.
@@ -170,6 +180,17 @@ private:
 	void sendRemoteCommand(NetCommandRef *msg);
 	void ackCommand(NetCommandRef *ref, UnsignedInt localSlot);
 
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 15/11/2026 Server mode match record path (PROTOCOL.md 4.6 and 4.7).
+	void updateServerMode(Bool isInGame);												///< Server mode replacement for update(): poll the relay and send queued records.
+	void sendServerModeCommand(NetCommandMsg *msg, UnsignedByte relay);	///< Server mode replacement for the send paths: add to local frame data and queue a record.
+	void queueServerRecord(NetCommandMsg *msg, UnsignedByte relay, UnsignedInt recordSize);	///< Append one carried command as a record to the outgoing DATA buffer.
+	void flushServerSend();																///< Send the queued records as one DATA message.
+	void processServerDataMessage(const UnsignedByte *data, UnsignedInt length);	///< Split a received DATA message into records.
+	void processServerRecord(const UnsignedByte *data, UnsignedInt length);	///< Turn one received record back into a command and apply it.
+	void handleServerDrop(UnsignedByte slot, UnsignedInt lastFrame);		///< Apply a DROP from the relay (PROTOCOL.md 4.7).
+#endif
+
 	Bool processNetCommand(NetCommandRef *ref);
 	void processAckStage1(NetCommandMsg *msg);
 	void processAckStage2(NetCommandMsg *msg);
@@ -225,6 +246,13 @@ private:
 	Int  m_minFps;
 	UnsignedInt m_smallestPacketArrivalCushion;
 	Bool m_didSelfSlug;
+#ifdef RTS_SERVERS
+	Bool m_serverMode;												///< Match traffic goes through the relay server instead of between the players.
+	Bool m_serverStarted;											///< TRUE once the relay sent START. No records are sent before this.
+	ServerLink *m_serverLink;									///< The relay match connection. Not owned. Null until attachServerLink.
+	UnsignedInt m_serverSendLength;						///< Bytes currently held in m_serverSendBuffer.
+	UnsignedByte m_serverSendBuffer[16383];		///< Outgoing records, one DATA message at a time (PROTOCOL.md 6: at most 16383 bytes of records).
+#endif
 
 	// -----------------------------------------------------------------------------
 	FileCommandMap s_fileCommandMap;

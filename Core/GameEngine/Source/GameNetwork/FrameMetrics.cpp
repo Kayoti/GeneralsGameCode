@@ -31,6 +31,9 @@
 #include "GameNetwork/FrameMetrics.h"
 #include "GameClient/Display.h"
 #include "GameNetwork/networkutil.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/NetworkInterface.h"
+#endif
 #include "../NGMP_include.h"
 #include "../NetworkMesh.h"
 #include "../NGMP_interfaces.h"
@@ -93,8 +96,17 @@ void FrameMetrics::init() {
 #if defined(GENERALS_ONLINE)
 	// NGMP_NOTE: Don't start with the assumption that we have latency. Connections are now formed earlier, so we have latency data earlier too.
 
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 15/11/2026 In server mode there is no player-to-player mesh, so the average
+	// latency is not read from mesh connections (the count is 0, which would divide by zero). Start from the
+	// default; the relay's own measurement is seeded in through SeedLatencyData.
+	const Bool serverMode = (TheNetwork != nullptr) && (TheNetwork->GetConnectionManager() != nullptr) && TheNetwork->GetConnectionManager()->isServerMode();
+#else
+	const Bool serverMode = FALSE;
+#endif
+
 	NetworkMesh* pMesh = NGMP_OnlineServicesManager::GetNetworkMesh();
-	if (TheNGMPGame != nullptr && pMesh != nullptr)
+	if (!serverMode && TheNGMPGame != nullptr && pMesh != nullptr)
 	{
 		int totalLatency = 0;
 		std::map<int64_t, PlayerConnection>& connections = pMesh->GetAllConnections();
