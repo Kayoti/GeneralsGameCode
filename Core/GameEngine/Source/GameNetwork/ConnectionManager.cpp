@@ -1441,7 +1441,8 @@ void ConnectionManager::updateServerMode(Bool isInGame)
 	// The disconnect manager still tracks frame stalls, but in server mode it never turns on the
 	// disconnect screen, never starts a vote and never removes a player. Removal comes only from a
 	// DROP or a leave command.
-	if (isInGame) {
+	// TheSuperHackers @bugfix Kayoti 15/11/2026 A server-mode match has no disconnect manager; the relay tracks stalls, so only update it when one exists.
+	if (isInGame && (m_disconnectManager != nullptr)) {
 		m_disconnectManager->update(this);
 	}
 
@@ -1841,7 +1842,8 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 			Real effectiveSlack = configuredSlack;
 
 #if defined(GENERALS_ONLINE)
-			if (TheNGMPGame != nullptr)
+			// TheSuperHackers @bugfix Kayoti 15/11/2026 Skip the online service config when there is no online services manager, as in a Servers match.
+			if (TheNGMPGame != nullptr && NGMP_OnlineServicesManager::GetInstance() != nullptr)
 			{
 				ServiceConfig& serviceConf = NGMP_OnlineServicesManager::GetInstance()->GetServiceConfig();
 				if (serviceConf.ibra_ra_tweaks)
@@ -2073,7 +2075,8 @@ Real ConnectionManager::getMaximumLatency()
 {
 	int latencyLogicModel = 0;
 
-	if (TheNGMPGame != nullptr)
+	// TheSuperHackers @bugfix Kayoti 15/11/2026 Skip the online service config when there is no online services manager, as in a Servers match.
+	if (TheNGMPGame != nullptr && NGMP_OnlineServicesManager::GetInstance() != nullptr)
 	{
 		ServiceConfig& serviceConf = NGMP_OnlineServicesManager::GetInstance()->GetServiceConfig();
 		latencyLogicModel = serviceConf.network_latency_logic_model;
@@ -2408,9 +2411,12 @@ Bool ConnectionManager::allCommandsReady(UnsignedInt frame, Bool justTesting /* 
 	}
 
 	if ((retval == TRUE) && (justTesting == FALSE)) {
-		m_disconnectManager->allCommandsReady(TheGameLogic->getFrame(), this);
-		retval = m_disconnectManager->allowedToContinue(); // allow the disconnect manager to keep us on this frame
-																											// in case we are waiting for a new packet router or something.
+		// TheSuperHackers @bugfix Kayoti 15/11/2026 A server-mode match has no disconnect manager; the relay drives frame progress and removes a stuck player with a DROP, so the frame stays allowed to continue once its commands are ready.
+		if (m_disconnectManager != nullptr) {
+			m_disconnectManager->allCommandsReady(TheGameLogic->getFrame(), this);
+			retval = m_disconnectManager->allowedToContinue(); // allow the disconnect manager to keep us on this frame
+																												// in case we are waiting for a new packet router or something.
+		}
 	}
 
 	return retval;
@@ -2418,7 +2424,10 @@ Bool ConnectionManager::allCommandsReady(UnsignedInt frame, Bool justTesting /* 
 
 void ConnectionManager::handleAllCommandsReady()
 {
-	m_disconnectManager->allCommandsReady(TheGameLogic->getFrame(), this, FALSE);
+	// TheSuperHackers @bugfix Kayoti 15/11/2026 A server-mode match has no disconnect manager; there is nothing to notify, so skip it rather than dereference a null pointer during loading.
+	if (m_disconnectManager != nullptr) {
+		m_disconnectManager->allCommandsReady(TheGameLogic->getFrame(), this, FALSE);
+	}
 }
 
 
