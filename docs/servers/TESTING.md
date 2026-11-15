@@ -48,6 +48,34 @@ ctest --test-dir build/relay --output-on-failure
 
 `Servers/Relay/README.md` gives the same configure and build commands for `<build dir>`. `relay_tests` can also be run directly: `build/relay/relay_tests.exe` prints `all relay tests passed`.
 
+## Build and run the lobby service
+
+The lobby service is a Go module under `Servers/Lobby`. It needs Go 1.26 or newer and internet access on the first build, to download its outside modules (the SQLite driver, pure Go, and the modules it needs). Run in a shell from the repository root:
+
+```
+cd Servers/Lobby
+gofmt -l .
+go vet ./...
+go test ./...
+go build -o <build dir>/lobby.exe ./cmd/lobby
+```
+
+`gofmt -l .` prints nothing when the formatting is clean. Put `<build dir>` outside the repository: `.gitignore` does not ignore `.exe` files.
+
+Start the service with the example configuration, `Servers/Lobby/lobby.conf`. The database path in the file is relative to the working directory, so run the service from a folder outside the repository, or change `database`:
+
+```
+<build dir>/lobby.exe --config <repository>/Servers/Lobby/lobby.conf
+```
+
+The example listens on `127.0.0.1:9000`. Set the TURN secret in the environment rather than in the file: `set LOBBY_TURN_SECRET=<secret>` in `cmd`. A missing or invalid value stops the service at start and the message names the key. Check that it is up:
+
+```
+curl http://127.0.0.1:9000/healthz
+```
+
+It answers `ok`. Calls are at `/env/{prod,test,dev}/contract/1/{Endpoint}`. Each request is logged with its method, path, status, duration and the caller's address with the last part hidden.
+
 ## Flags (restored by package C3)
 
 All flags are read at engine start. The flag names are not case sensitive.
