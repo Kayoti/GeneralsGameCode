@@ -1,23 +1,54 @@
 # Testing
 
-> This page was written for the earlier base (the plain community source). Its build commands and executable names are out of date. Package 0.2 replaces the build section, package C3 restores the launch flags on this base and updates the rest. The flag names and their meaning stay the same.
+> The build sections below match this base (Generals Online client). The launch-flag sections were written for the earlier base and are restored by package C3; the flags do not exist in the client until then. The flag names and their meaning stay the same.
 
 ## A Servers match without the lobby
 
 This page explains how to start a relay match from launch flags, with several game instances on one PC. It is for the phase gates and for debugging. It needs a build with the Servers switch on and the game data installed.
 
-## Build
+## Build the client
 
-Configure with both options:
+The client is a 32-bit Windows build. Run everything in one `cmd` session from the repository root, in the x86 developer environment. Visual Studio 2026 Build Tools provide the compiler and a bundled vcpkg; `VCPKG_ROOT` points at that copy. CMake and Ninja must be on `PATH`. The first configure compiles the vcpkg libraries (about 45 minutes) and needs internet access. Later runs reuse them.
 
 ```
-cmake --preset win32 -B <build dir> -DRTS_BUILD_OPTION_SERVERS=ON -DRTS_DEBUG_MULTI_INSTANCE=ON
+"C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x86
+set "VCPKG_ROOT=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\vcpkg"
 ```
 
-- `RTS_BUILD_OPTION_SERVERS=ON` builds Servers mode and the flags below. With it off the flags do not exist and are ignored like any unknown argument.
-- `RTS_DEBUG_MULTI_INSTANCE=ON` defines `RTS_MULTI_INSTANCE`, which lets several game instances run side by side (`ClientInstance.cpp`). Without it a second instance exits at start.
+Switch off (the plain client; this is the baseline):
 
-## Flags
+```
+cmake --preset win32-vcpkg
+cmake --build build/win32-vcpkg --config Release --target z_generals
+```
+
+Switch on (Servers mode, with several instances allowed):
+
+```
+cmake --preset win32-vcpkg-servers
+cmake --build build/win32-vcpkg-servers --config Release --target z_generals
+cmake --build build/win32-vcpkg-servers --config Debug --target z_generals
+```
+
+- The preset `win32-vcpkg-servers` inherits `win32-vcpkg` and sets `RTS_BUILD_OPTION_SERVERS=ON` (defines `RTS_SERVERS`), `RTS_DEBUG_MULTI_INSTANCE=ON` (defines `RTS_MULTI_INSTANCE`, which lets several game instances run side by side; without it a second instance exits at start) and `RTS_BUILD_GENERALS=OFF`.
+- With `RTS_BUILD_OPTION_SERVERS` off the Servers code and the flags below do not exist.
+- The Debug configuration of the Servers preset is the one used by the phase checks that need the game.
+- Build folders are under `build/` and are ignored by git.
+
+## Build the relay
+
+The relay is a standalone x64 CMake project under `Servers/Relay`. It does not use the game build. It fetches ENet, libsodium and libmaxminddb on the first configure, so it needs internet access. Run in a `cmd` session from the repository root:
+
+```
+"C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+cmake -S Servers/Relay -B build/relay -G Ninja -DCMAKE_BUILD_TYPE=Release -DRELAY_BUILD_TESTS=ON
+cmake --build build/relay
+ctest --test-dir build/relay --output-on-failure
+```
+
+`Servers/Relay/README.md` gives the same configure and build commands for `<build dir>`. `relay_tests` can also be run directly: `build/relay/relay_tests.exe` prints `all relay tests passed`.
+
+## Flags (restored by package C3)
 
 All flags are read at engine start. The flag names are not case sensitive.
 
@@ -37,7 +68,7 @@ Give exactly one of `-serversHost` and `-serversJoin`. `-serversRelay`, `-server
 
 `-serversMap` is the map's name in the map cache, for example `Maps\Tournament Desert\Tournament Desert.map`. A shorter form is also tried: `Tournament Desert\Tournament Desert.map`, or just `Tournament Desert`. Every instance must be given the same map.
 
-## Fixed match values
+## Fixed match values (restored by package C3)
 
 The match settings are the same for every instance, so all instances load the same game. These values are chosen for testing and can be changed in `Core/GameEngine/Source/GameNetwork/ServersDirect.cpp`.
 
@@ -47,7 +78,7 @@ The match settings are the same for every instance, so all instances load the sa
 - Team: none (every player for themselves). Start positions are assigned from the seed by the game, as for a random start position in the lobby.
 - Player names: `Player 1` to `Player N`.
 
-## Window flags
+## Window flags (restored by package C3)
 
 Use the existing flags to put the instances side by side:
 
@@ -55,7 +86,7 @@ Use the existing flags to put the instances side by side:
 - `-xres <width>` and `-yres <height>` set the window size, for example `-xres 800 -yres 600`.
 - `-quickstart` skips the intro, the shell map and the window animation, so the main menu comes up fast. The direct start waits for the main menu.
 
-## Running a two player match
+## Running a two player match (restored by package C3)
 
 1. Start the relay (see the relay's own notes) so that it listens on a known address and port. The examples use `127.0.0.1` and `7777`.
 2. Start the host from the game folder:
@@ -82,18 +113,18 @@ The host launches as soon as the relay has answered `CREATE`. The relay waits 30
 
 A join token works once. To run again, start a new host and use its new tokens.
 
-## What is logged
+## What is logged (restored by package C3)
 
 The lines start with `Servers direct:` and tell which step ran: the entry check result, `CREATE` or `JOIN` sent, the tokens, and the launch (map, seed, local slot). A failure shows a message box and the reason in the log.
 
-## Notes
+## Notes (restored by package C3)
 
 - The match runs through the relay only. The online lobby, NAT negotiation and the engine's player-to-player connections are not used.
 - This path is a test aid. Ending the match returns to the main menu, and the score screen is not the one of a Servers match (package 2.2).
 
 ## Findings from the first live run (2026-11-14)
 
-Verified on Windows with a `win32` build (`RTS_BUILD_OPTION_SERVERS=ON`, `RTS_DEBUG_MULTI_INSTANCE=ON`). A host and a joiner started from the flags above completed the full path on one PC: entry check pass, `CREATE`/`JOIN`, `session started with 2 players`, both instances loaded the map and ran the lockstep simulation with `FRAMEINFO` flowing through the relay. Points that are easy to trip over:
+Verified on Windows with a build of the earlier base (`RTS_BUILD_OPTION_SERVERS=ON`, `RTS_DEBUG_MULTI_INSTANCE=ON`). A host and a joiner started from the flags above completed the full path on one PC: entry check pass, `CREATE`/`JOIN`, `session started with 2 players`, both instances loaded the map and ran the lockstep simulation with `FRAMEINFO` flowing through the relay. Points that are easy to trip over:
 
 - **Relay on one PC:** run it with `--no-address-check`, or the second instance from `127.0.0.1` is refused by the per-address limit. The config must list every `vpn_*` key even when `vpn_check = off` (only the data *files* are skipped, not the keys). Generate the region key once with `relay --generate-key <file>` before first run.
 - **`-serversMap` needs the official map cache.** The resolver only matches a map held under an official-style key (`maps\<name>\<name>.map`); it lowercases and looks up that exact key (`MapCache::findMap`). An install whose `MapCache.ini` holds only user maps (each keyed by its absolute path) has no such entry, so the host logs `map <name> is not in the map cache` and aborts before `CREATE` completes. This is common on a GeneralsOnline install, whose local cache carries only custom maps. Build the standard cache (`generalszh.exe -buildmapcache`, or feed the official map list to `mapcachebuilder`) so the chosen map is present under that key.
