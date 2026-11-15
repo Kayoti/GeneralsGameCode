@@ -24,9 +24,9 @@ Put every outside address of the client in one header, point them at our service
 - New file `GeneralsMD/Code/GameEngine/Include/GameNetwork/GeneralsOnline/ServiceHosts.h`
 - `GeneralsMD/Code/GameEngine/Source/GameNetwork/GeneralsOnline/OnlineServices_Init.cpp`, `OnlineServices_Auth.cpp`, `OnlineServices_RoomsInterface.cpp`, `OnlineServices_Moderation.cpp`, `NetworkMesh.cpp`, `DiscordRichPresence.cpp`, `GeneralsOnline_Settings.cpp`, `PluginInterfaces.cpp`
 - `GeneralsMD/Code/GameEngine/Include/GameNetwork/GeneralsOnline/OnlineServices_Init.h`, `NextGenMP_defines.h`
-- `GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp` (the crash-reporting and Discord start calls only)
+- `GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp` (the crash-reporting and Discord start calls, and the player-facing text that shows the service name)
 - `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/ScoreScreen.cpp`, `WOLLobbyMenu.cpp`, `WOLGameSetupMenu.cpp`, `WOLWelcomeMenu.cpp` (only the lines that open a web link or show the service name)
-- `Core/GameEngine/Source/GameClient/Intro.cpp`, `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` (only the text that names the web site)
+- `Core/GameEngine/Source/GameClient/Intro.cpp`, `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` (only the text that names the web site or shows the service name)
 - `docs/servers/TESTING.md`
 
 ## Must not edit
@@ -87,3 +87,7 @@ Put every outside address of the client in one header, point them at our service
   - The client limits a new name to 16 characters (`WOLLobbyMenu.cpp`), SERVICE.md section 4 says 3 to 20. Not part of this package.
   - PROTOCOL.md section 10 assumptions: none of them concern this package.
 - Review findings and fixes:
+  - Scope of `GameEngine.cpp` and `MainMenuUtils.cpp`: the display-name text edits stay; the "May edit" entries now allow player-facing text that shows the service name.
+  - `OnlineServices_RoomsInterface.cpp`: removed the unused `ToWide` and `ToUtf8` helpers and the unused `<psapi.h>`, `<wincrypt.h>`, `<softpub.h>` includes with their three `#pragma comment(lib, ...)` lines (searched: no other use in `GeneralsMD` or `Core`).
+  - `DiscordRichPresence.cpp`: the previous team's Discord application id is replaced by an empty string; the only use is the `m_initialize` call, and presence is never started.
+  - Rebuilt: `win32-vcpkg` Release, `win32-vcpkg-servers` Release and Debug, target `z_generals`, all linked, exit 0. Lint: not run.

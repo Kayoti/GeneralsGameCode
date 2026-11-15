@@ -16,35 +16,9 @@ static int64_t NowMs()
 }
 
 #include <windows.h>
-#include <psapi.h>
-#include <wincrypt.h>
-#include <softpub.h>
 #include <string>
 #include <vector>
 #include <iostream>
-
-#pragma comment(lib, "psapi.lib")
-#pragma comment(lib, "crypt32.lib")
-#pragma comment(lib, "wintrust.lib")
-
-// -----------------------------
-// UTF-8 <-> UTF-16 helpers
-// -----------------------------
-std::wstring ToWide(const std::string& s) {
-    int size = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
-    std::wstring out(size, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &out[0], size);
-    out.resize(size - 1);
-    return out;
-}
-
-std::string ToUtf8(const std::wstring& s) {
-    int size = WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string out(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, &out[0], size, nullptr, nullptr);
-    out.resize(size - 1);
-    return out;
-}
 
 WebSocket::WebSocket()
 {
