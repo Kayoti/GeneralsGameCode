@@ -28,3 +28,13 @@ func turnCredentials(secret string, userID int64, now time.Time) (username strin
 	mac.Write([]byte(username))
 	return username, base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
+
+// turnFor returns the TURN credentials for the answer to creating or joining
+// a lobby: empty for a server lobby, which has no player-to-player
+// connections (SERVICE.md section 10), and as turnCredentials says for any other.
+func (routes *server) turnFor(isServerLobby bool, userID int64) (username string, token string) {
+	if isServerLobby {
+		return "", ""
+	}
+	return turnCredentials(routes.turnSecret, userID, time.Now())
+}

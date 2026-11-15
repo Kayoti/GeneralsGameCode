@@ -100,7 +100,9 @@ func (hub *Hub) leaveLobby(target *player) {
 		delete(hub.lobbies, lobby.ID())
 	} else {
 		hub.notifyMembers(lobby)
-		hub.disconnectFromLeaver(lobby.ID(), target.userID, lobby.Humans())
+		if !lobby.IsServer() {
+			hub.disconnectFromLeaver(lobby.ID(), target.userID, lobby.Humans())
+		}
 	}
 	if wasListed {
 		hub.notifyWatchers()
@@ -110,7 +112,9 @@ func (hub *Hub) leaveLobby(target *player) {
 // CreateLobby creates a lobby with the account as host and returns its id
 // (PUT Lobbies). An account already in a lobby leaves it first. It returns
 // ErrNotConnected for an account with no WebSocket and an *lobbies.InvalidError
-// for a request that is not valid; neither changes anything.
+// for a request that is not valid; neither changes anything. A request with
+// ServerMode makes a server lobby of the region in RegionTag; the caller has
+// checked the pass.
 func (hub *Hub) CreateLobby(userID int64, request lobbies.CreateRequest) (int64, error) {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
@@ -161,30 +165,33 @@ func (hub *Hub) LobbyDetail(userID int64, lobbyID int64) (lobbies.DetailLobby, b
 // JoinLobby puts the account in a lobby (PUT Lobby/{id}). It returns one of
 // the lobbies.Err values for the failures of SERVICE.md section 7.2, or
 // ErrNotConnected. An account already in a lobby leaves it when the join
-// succeeds; one already in this lobby changes nothing.
-func (hub *Hub) JoinLobby(userID int64, lobbyID int64, request lobbies.JoinRequest) error {
+// succeeds; one already in this lobby changes nothing. The first result is
+// true when the lobby is a server lobby.
+func (hub *Hub) JoinLobby(userID int64, lobbyID int64, request lobbies.JoinRequest) (bool, error) {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
 	joiner, found := hub.players[userID]
 	if !found {
-		return ErrNotConnected
+		return false, ErrNotConnected
 	}
 	lobby, found := hub.lobbies[lobbyID]
 	if !found {
-		return lobbies.ErrLobbyNotFound
+		return false, lobbies.ErrLobbyNotFound
 	}
 	if lobby.IsMember(userID) {
-		return nil
+		return lobby.IsServer(), nil
 	}
 	wasListed := lobby.IsListed()
 	if err := lobby.Join(userID, request, time.Now()); err != nil {
-		return err
+		return false, err
 	}
 	hub.leaveLobby(joiner)
 	joiner.lobbyID = lobbyID
 	hub.lobbyChanged(lobby, wasListed)
-	hub.startJoinerSignalling(lobbyID, joiner, lobby.Humans())
-	return nil
+	if !lobby.IsServer() {
+		hub.startJoinerSignalling(lobbyID, joiner, lobby.Humans())
+	}
+	return lobby.IsServer(), nil
 }
 
 // ChangeLobby applies one change of POST Lobby/{id}. A refused change has no
@@ -205,6 +212,19 @@ func (hub *Hub) ChangeLobby(userID int64, lobbyID int64, request lobbies.FieldRe
 	case lobbies.ChangeKick:
 		hub.kickFromLobby(kickedID)
 	}
+}
+
+// SetServerSession stores the server session of field 19 for the lobby and
+// returns true, or returns false and changes nothing (SERVICE.md section 10).
+// It sends no notice: the session is never shown to any client.
+func (hub *Hub) SetServerSession(userID int64, lobbyID int64, request lobbies.FieldRequest) bool {
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	lobby, found := hub.lobbies[lobbyID]
+	if !found {
+		return false
+	}
+	return lobby.SetServerSession(userID, request)
 }
 
 // kickFromLobby removes a member on the host's order and tells the member's

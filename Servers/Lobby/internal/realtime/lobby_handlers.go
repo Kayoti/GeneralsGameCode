@@ -142,9 +142,21 @@ func (hub *Hub) handleStartGame(live *connection) {
 	hub.lobbyChanged(lobby, wasListed)
 	for _, userID := range lobby.Humans() {
 		if member, found := hub.players[userID]; found {
-			hub.queueHeldMessage(member, msgStartGame, startGameMessage{MsgID: msgStartGame})
+			hub.queueHeldMessage(member, msgStartGame, hub.startMessageFor(lobby, userID))
 		}
 	}
+	lobby.ClearServerSession()
+}
+
+// startMessageFor returns message 13 for one member: the plain message for an
+// Online lobby, and for a server lobby the message with that member's own
+// session, slot and token. The caller holds hub.mu.
+func (hub *Hub) startMessageFor(lobby *lobbies.Lobby, userID int64) any {
+	if !lobby.IsServer() {
+		return startGameMessage{MsgID: msgStartGame}
+	}
+	session, slotIndex, token, _ := lobby.StartInfo(userID)
+	return serverStartGameMessage{MsgID: msgStartGame, ServerSession: session, ServerSlot: slotIndex, ServerToken: token}
 }
 
 // queueHeldMessage encodes a message and puts it in the outbox of target,

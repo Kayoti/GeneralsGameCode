@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"servers-lobby/internal/accounts"
+	"servers-lobby/internal/pass"
 	"servers-lobby/internal/realtime"
 )
 
@@ -57,6 +58,9 @@ type Options struct {
 	// TurnSecret is the key of the TURN credentials (SERVICE.md section 8.1).
 	// It is never logged. Empty means the answers carry empty credentials.
 	TurnSecret string
+	// Passes checks the X-Servers-Pass header of a server lobby (SERVICE.md
+	// section 10). Nil refuses every pass.
+	Passes *pass.Verifier
 }
 
 // server answers the contract calls. It holds what the calls need.
@@ -67,6 +71,7 @@ type server struct {
 	wsURI             string
 	motd              string
 	turnSecret        string
+	passes            *pass.Verifier
 	logger            *slog.Logger
 }
 
@@ -80,6 +85,7 @@ func NewHandler(options Options, accountService *accounts.Service, hub *realtime
 		wsURI:             options.WSURI,
 		motd:              options.MOTD,
 		turnSecret:        options.TurnSecret,
+		passes:            options.Passes,
 		logger:            logger,
 	}
 	return withRequestLog(options.TrustForwardedFor, logger, withBodyLimit(http.HandlerFunc(routes.serve)))

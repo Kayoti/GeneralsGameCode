@@ -70,12 +70,13 @@ func (hub *Hub) disconnectFromLeaver(lobbyID int64, leaverID int64, humans []int
 }
 
 // lobbyMate returns the sender's lobby and the player with id targetID when
-// that player is another human member of the same lobby. The id comes from
-// the client, so both are checked as members. The caller holds hub.mu.
+// that player is another human member of the same Online lobby. A server
+// lobby has no player-to-player connections (SERVICE.md section 10). The id
+// comes from the client, so both are checked as members. The caller holds hub.mu.
 func (hub *Hub) lobbyMate(sender *player, targetID int64) (*lobbies.Lobby, *player, bool) {
 	lobby := hub.lobbyOf(sender)
 	target, found := hub.players[targetID]
-	if !found || lobby == nil || target == sender || !lobby.IsMember(sender.userID) || !lobby.IsMember(target.userID) {
+	if !found || lobby == nil || lobby.IsServer() || target == sender || !lobby.IsMember(sender.userID) || !lobby.IsMember(target.userID) {
 		return nil, nil, false
 	}
 	return lobby, target, true

@@ -6,12 +6,23 @@
 // find it in the list and join it, and the first start the match. It prints one line per step, and exits with status 1 at
 // the first step that fails. It never prints a token.
 //
+// With --server-key it then runs the server lobby path: it signs its own
+// passes with the secret key file of a region (as written by relay
+// --generate-key), creates and joins a server lobby with them, posts the
+// server session (field 19), starts the match and reads its own session, slot
+// and token from message 13. The service must hold the public key of that key
+// under the region number and tag given.
+//
 // Usage: lobbyprobe --url <base address> --env <environment>
+//
+//	[--server-key <file> [--region <number>] [--region-tag <tag>]]
+//
 // For example: lobbyprobe --url http://127.0.0.1:9000 --env dev
 package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -23,6 +34,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"servers-lobby/internal/pass"
 )
 
 // requestTimeout limits one call to the service.
@@ -52,25 +65,53 @@ type probe struct {
 	userID   float64
 	// members are the two accounts the WebSocket step connected, in room 1.
 	members []*account
+	// server is set when the probe also runs the server lobby path.
+	server *serverOptions
+}
+
+// serverOptions are what the probe needs to sign passes and to check the
+// lobby it creates with them.
+type serverOptions struct {
+	key       ed25519.PrivateKey
+	region    uint16
+	regionTag string
 }
 
 func main() {
 	url := flag.String("url", "http://127.0.0.1:9000", "base address of the lobby service")
 	env := flag.String("env", "dev", "environment name in the contract path")
+	keyFile := flag.String("server-key", "", "secret key file of a region; also runs the server lobby path")
+	region := flag.Uint("region", 1, "region number of the key, as in the service configuration")
+	regionTag := flag.String("region-tag", "eu", "region tag of the key, as in the service configuration")
 	flag.Parse()
-	if err := run(*url, *env, os.Stdout); err != nil {
+	var server *serverOptions
+	if *keyFile != "" {
+		if *region < 1 || *region > 65535 {
+			fmt.Fprintln(os.Stderr, "lobbyprobe: --region must be 1 to 65535")
+			os.Exit(1)
+		}
+		key, err := pass.LoadSigningKey(*keyFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "lobbyprobe:", err)
+			os.Exit(1)
+		}
+		server = &serverOptions{key: key, region: uint16(*region), regionTag: *regionTag}
+	}
+	if err := run(*url, *env, server, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "lobbyprobe:", err)
 		os.Exit(1)
 	}
 }
 
-// run performs every step against the service at baseURL and writes one line per step to out.
-func run(baseURL string, env string, out io.Writer) error {
+// run performs every step against the service at baseURL and writes one line
+// per step to out. The server lobby path runs only when server is not nil.
+func run(baseURL string, env string, server *serverOptions, out io.Writer) error {
 	p := &probe{
 		client:   &http.Client{Timeout: requestTimeout},
 		baseURL:  strings.TrimSuffix(baseURL, "/"),
 		contract: fmt.Sprintf("%s/env/%s/contract/1", strings.TrimSuffix(baseURL, "/"), env),
 		out:      out,
+		server:   server,
 	}
 	steps := []func() error{
 		p.versionCheck,
@@ -80,6 +121,9 @@ func run(baseURL string, env string, out io.Writer) error {
 		p.loginWithToken,
 		p.webSocketRoom,
 		p.lobbyToMatchStart,
+	}
+	if server != nil {
+		steps = append(steps, p.serverLobbyToMatchStart)
 	}
 	defer p.closeSockets()
 	for _, step := range steps {
@@ -187,30 +231,48 @@ func (p *probe) loginWithToken() error {
 // other than 200, and for a body that is not a JSON object. The error text
 // never includes the body.
 func (p *probe) call(endpoint string, method string, token string, body string) (map[string]any, error) {
+	status, answer, err := p.request(endpoint, method, token, body, "")
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("status %d", status)
+	}
+	return answer, nil
+}
+
+// request is call that returns the status instead of failing on one other
+// than 200, and sends the pass as the X-Servers-Pass header when it is not
+// empty. The answer is decoded for every status; the error text never
+// includes the body.
+func (p *probe) request(endpoint string, method string, token string, body string, passHeader string) (int, map[string]any, error) {
 	request, err := http.NewRequest(method, p.contract+"/"+endpoint, strings.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
+		return 0, nil, fmt.Errorf("build request: %w", err)
 	}
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
+	if passHeader != "" {
+		request.Header.Set(pass.Header, passHeader)
+	}
 	response, err := p.client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return 0, nil, fmt.Errorf("send request: %w", err)
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxAnswerBytes))
 	if err != nil {
-		return nil, fmt.Errorf("read answer: %w", err)
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d", response.StatusCode)
+		return 0, nil, fmt.Errorf("read answer: %w", err)
 	}
 	var answer map[string]any
 	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&answer); err != nil || answer == nil {
-		return nil, errors.New("answer is not a JSON object")
+		if response.StatusCode != http.StatusOK {
+			return response.StatusCode, nil, nil
+		}
+		return 0, nil, errors.New("answer is not a JSON object")
 	}
-	return answer, nil
+	return response.StatusCode, answer, nil
 }
 
 // requireLoginAnswer checks the keys of AuthResponse and that the login succeeded.

@@ -1,6 +1,6 @@
 # L6 Lobby service: server lobbies
 
-State: todo
+State: done
 Branch: servers-go-L6
 
 ## Goal
@@ -29,19 +29,19 @@ L5
 
 ## Done when
 
-- [ ] The service reads each region's tag and public key from configuration. The public key file format is the one `relay --generate-key` writes. A region with an unreadable key stops the service at start with a message.
-- [ ] A function checks an `X-Servers-Pass` header value by the rules of PROTOCOL.md 5.2: 200 lowercase hexadecimal digits, valid signature for the region in the pass, `version` 1, not expired, and build fingerprints equal to given values. Any other input is refused without a panic.
-- [ ] `PUT Lobbies` with `server_mode: true` requires a valid pass whose fingerprints equal the request's `exe_crc` and `ini_crc`. The lobby gets `LobbyType` 2 and `Region` set to that region's tag. Without a valid pass the answer has `result` 0 and all four keys.
-- [ ] `PUT Lobby/{id}` on a server lobby requires a valid pass for the lobby's region with the lobby's fingerprints. Refusal is `403`.
-- [ ] Server lobbies get empty TURN credentials. Messages 17 and 18 are never sent for them, and 12 and 19 from their members are dropped.
-- [ ] Message 26 from the host of a server lobby is answered at once with 28, `mesh_complete` true.
-- [ ] A member with `has_map` false cannot become ready in a server lobby.
-- [ ] `POST Lobby/{id}` with `field` 19 validates and stores the server session by the rules in SERVICE.md section 10, answers `{"result":1}` or `{"result":0}`, and is cleared when any member joins or leaves. It never appears in any other answer or in a log.
-- [ ] Message 13 from the host of a server lobby is ignored without a stored session. With one, each member's message 13 carries `server_session`, `server_slot` and `server_token` for that member only; the host's token is an empty string.
-- [ ] Online lobbies behave exactly as after L5. A test proves a lobby created without `server_mode` ignores the header.
-- [ ] Tests sign passes with a key pair generated in the test. They cover: good pass, bad signature, expired, wrong region, wrong fingerprints, wrong length, non-hexadecimal, create and join with and without a pass, token delivery to three members, and a join after the session was stored.
-- [ ] `lobbyprobe` gets a mode that signs its own passes with a key file given on the command line and runs the server lobby path end to end, including field 19 and reading its own token from message 13.
-- [ ] The checks for this program in STANDARDS.md, "Before a package is done", pass.
+- [x] The service reads each region's tag and public key from configuration. The public key file format is the one `relay --generate-key` writes. A region with an unreadable key stops the service at start with a message.
+- [x] A function checks an `X-Servers-Pass` header value by the rules of PROTOCOL.md 5.2: 200 lowercase hexadecimal digits, valid signature for the region in the pass, `version` 1, not expired, and build fingerprints equal to given values. Any other input is refused without a panic.
+- [x] `PUT Lobbies` with `server_mode: true` requires a valid pass whose fingerprints equal the request's `exe_crc` and `ini_crc`. The lobby gets `LobbyType` 2 and `Region` set to that region's tag. Without a valid pass the answer has `result` 0 and all four keys.
+- [x] `PUT Lobby/{id}` on a server lobby requires a valid pass for the lobby's region with the lobby's fingerprints. Refusal is `403`.
+- [x] Server lobbies get empty TURN credentials. Messages 17 and 18 are never sent for them, and 12 and 19 from their members are dropped.
+- [x] Message 26 from the host of a server lobby is answered at once with 28, `mesh_complete` true.
+- [x] A member with `has_map` false cannot become ready in a server lobby.
+- [x] `POST Lobby/{id}` with `field` 19 validates and stores the server session by the rules in SERVICE.md section 10, answers `{"result":1}` or `{"result":0}`, and is cleared when any member joins or leaves. It never appears in any other answer or in a log.
+- [x] Message 13 from the host of a server lobby is ignored without a stored session. With one, each member's message 13 carries `server_session`, `server_slot` and `server_token` for that member only; the host's token is an empty string.
+- [x] Online lobbies behave exactly as after L5. A test proves a lobby created without `server_mode` ignores the header.
+- [x] Tests sign passes with a key pair generated in the test. They cover: good pass, bad signature, expired, wrong region, wrong fingerprints, wrong length, non-hexadecimal, create and join with and without a pass, token delivery to three members, and a join after the session was stored.
+- [x] `lobbyprobe` gets a mode that signs its own passes with a key file given on the command line and runs the server lobby path end to end, including field 19 and reading its own token from message 13.
+- [x] The checks for this program in STANDARDS.md, "Before a package is done", pass.
 - [ ] Reviewed by someone other than the author.
 
 ## Out of scope
@@ -51,7 +51,12 @@ L5
 
 ## Handoff notes
 
-- Finished:
-- Left to do:
+- Finished: `Servers/Lobby/internal/pass/` (new: `pass.go` check and key loading, `sign.go` signing for the probe and tests), `internal/config` unchanged, `internal/lobbies/` (`lobby.go`, `requests.go`, `views.go`, new `serversession.go`), `internal/realtime/` (`lobbies.go`, `lobby_handlers.go`, `meshcheck.go`, `messages.go`, `p2p.go`), `internal/api/` (`lobbies.go`, `handler.go`, `turn.go`), `cmd/lobby/main.go`, `tools/lobbyprobe/` (`main.go`, new `serverlobby.go`), tests in each package, and a comment line in `lobby.conf`. `Hub.JoinLobby` now also returns whether the lobby is a server lobby, so existing test call sites changed from `err :=` to `_, err :=`.
+- Left to do: review by someone other than the author.
 - Surprises and open questions:
+  - `lobby.conf` names `keys/region.key.pub`. Since the service now stops at start when a region key cannot be read, the example config only starts once that file exists (generate with `relay --generate-key keys/region.key`). TESTING.md, which describes starting the service with that file, was not edited (outside "May edit").
+  - A field 19 body with a wrong-typed key (for example a number as `server_session`) is answered `{"result":0}`, not `{}`, because the field can still be read.
+  - The pass check does not compare the reserved bytes or `issued_at` (PROTOCOL.md 5.2 lists neither); the relay also checks reserved bytes, which the signature already covers for passes the relay made.
+  - Host `has_map` is not required for ready, since the host is always ready (SERVICE.md 7.1).
+  - Verified live: built the service and `lobbyprobe`, generated a key pair, ran `lobbyprobe --server-key` against the running service: every step ok, exit 0. The service refused to start with the `.pub` file missing, with a message naming the region and file.
 - Review findings and fixes:

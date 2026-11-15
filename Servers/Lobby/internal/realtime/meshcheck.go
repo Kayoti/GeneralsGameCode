@@ -48,12 +48,13 @@ type meshCheck struct {
 }
 
 // startMeshCheck starts the check for a lobby on the host's message 26 and
-// replaces a check that was running. A lobby of one human passes at once.
+// replaces a check that was running. A lobby of one human passes at once, and
+// so does a server lobby, which has no connections to check (SERVICE.md section 10).
 // The caller holds hub.mu.
 func (hub *Hub) startMeshCheck(lobby *lobbies.Lobby) {
 	hub.cancelMeshCheck(lobby.ID())
 	humans := lobby.Humans()
-	if len(humans) < 2 {
+	if lobby.IsServer() || len(humans) < 2 {
 		hub.sendMeshPassed(lobby.Owner())
 		return
 	}
