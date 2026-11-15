@@ -42,7 +42,7 @@ L3
 - [x] Tests cover create, list, join (each failure), each field change, ready, chat, password change, kick, host leaving, last member leaving, start with and without everyone ready.
 - [x] `lobbyprobe` now also runs: account A creates a lobby, account B sees it in the list and joins, both read the detail, B readies, A sends the start message, both receive it.
 - [x] The checks for this program in STANDARDS.md, "Before a package is done", pass.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -76,4 +76,23 @@ L3
   - A join by an account already in the target lobby answers 200 without change; a join of another lobby leaves the old one only after the new join is accepted.
   - Verified by running: `go test ./...` and `lobbyprobe` against a started `lobby.exe` (all steps passed, including the new lobby step). Not verified: the real game client.
 - Review findings and fixes:
+  - Verified: `gofmt -l .` clean, `go vet ./...` clean, `go test ./...` passes (accounts, api, config,
+    lobbies, realtime, store). The seven lobby HTTP calls require login and carry every key the client
+    reads with eight member slots; join failures use the specification's status codes (404 unknown or
+    started, 406 locked or full, 401 wrong password); the field-change rules enforce who may change what,
+    the ranges and the ready rules, and keep the host ready; the countdown lock is host-only, blocks joins
+    and ready changes, expires, and ends on start or on message 26; a held place keeps pending messages 6,
+    7 and 13 in order across a reconnect; message 13 goes 6-then-13 to every human including the host;
+    a player is in one lobby and one slot at a time; all state is under one mutex with no socket write held
+    under the lock and no database access on the message path; every slot index and field from a client is
+    bounds-checked and the sender is taken from the connection, never the message. Every lobby and member
+    JSON key and every realtime message id and field matches the reference. Scope, author and commit
+    hygiene correct.
+  - One low note, accepted as a design-fill: the `max_players` shrink check (`lobbies/changes.go`) refuses
+    the change when any slot at or above the new value holds a human or an AI (a position rule), which is
+    stricter than SERVICE 7.3's count rule and can refuse a map change that would strand an AI in a high
+    slot while the occupied count is still within the new limit. SERVICE is silent on what becomes of a
+    stranded AI, so refusing is a defensible handling of that gap. It is uncommon, does not crash, and the
+    host can remove the AI and retry. Left as is; SERVICE 7.3 is a limit decision, not changed here. See
+    the status log.
 
