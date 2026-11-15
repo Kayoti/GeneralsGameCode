@@ -1841,7 +1841,8 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 			Real effectiveSlack = configuredSlack;
 
 #if defined(GENERALS_ONLINE)
-			if (TheNGMPGame != nullptr)
+			// TheSuperHackers @bugfix Kayoti 15/11/2026 Skip the online service config when there is no online services manager, as in a Servers match.
+			if (TheNGMPGame != nullptr && NGMP_OnlineServicesManager::GetInstance() != nullptr)
 			{
 				ServiceConfig& serviceConf = NGMP_OnlineServicesManager::GetInstance()->GetServiceConfig();
 				if (serviceConf.ibra_ra_tweaks)
@@ -2073,7 +2074,8 @@ Real ConnectionManager::getMaximumLatency()
 {
 	int latencyLogicModel = 0;
 
-	if (TheNGMPGame != nullptr)
+	// TheSuperHackers @bugfix Kayoti 15/11/2026 Skip the online service config when there is no online services manager, as in a Servers match.
+	if (TheNGMPGame != nullptr && NGMP_OnlineServicesManager::GetInstance() != nullptr)
 	{
 		ServiceConfig& serviceConf = NGMP_OnlineServicesManager::GetInstance()->GetServiceConfig();
 		latencyLogicModel = serviceConf.network_latency_logic_model;
