@@ -41,7 +41,7 @@ After 0.2, tracks L, B and C can start together.
 
 | Package | Title | Depends on | State |
 |---|---|---|---|
-| [L1](packages/L1-service-skeleton.md) | Lobby service: program skeleton, configuration and fixed answers | 0.2 | todo |
+| [L1](packages/L1-service-skeleton.md) | Lobby service: program skeleton, configuration and fixed answers | 0.2 | done |
 | [L2](packages/L2-service-login.md) | Lobby service: accounts, login and tokens | L1 | todo |
 | [L3](packages/L3-service-websocket.md) | Lobby service: WebSocket, rooms, room chat and names | L2 | todo |
 | [L4](packages/L4-service-lobbies.md) | Lobby service: lobbies | L3 | todo |
@@ -96,4 +96,5 @@ The checks that need the game use the Debug configuration of the `win32-vcpkg-se
 | 2026-11-14 | The base changed from the plain community source to the Generals Online client (commit `6ff404436`), on the new branch `servers-go`. Reason: a live test showed that the Generals Online data does not run on the plain build, and players use the Generals Online client. |
 | 2026-11-14 | The project runs its own lobby service (decisions D35 to D50). The client's side of the service contract was read from the client code and recorded under `reference/`. `SERVICE.md` written. `PROTOCOL.md` section 5 rewritten for the own service; the relay link (section 4) is unchanged. |
 | 2026-11-14 | The earlier packages and status moved to `archive/`. New packages written for phases 0 to 2. The relay and the client's relay pieces are carried over from the `servers` branch by packages 0.2, C1, C2 and C3. |
+| 2026-11-15 | L1 done: the lobby service skeleton, configuration reader, SQLite store and the fixed answers of SERVICE 5.2 plus VersionCheck and the health check. Go sources are pinned to LF on checkout. |
 | 2026-11-15 | Package 0.2 merged. The Generals Online client builds with the `win32-vcpkg` preset. The `RTS_BUILD_OPTION_SERVERS` switch and the `win32-vcpkg-servers` preset are added. The relay and the client region files are carried over from the earlier work; the relay builds and `relay_tests` pass. |

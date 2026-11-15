@@ -41,7 +41,7 @@ Create the lobby service program with its configuration, routing, logging and te
 - [x] Each handler has a test using `httptest`.
 - [x] TESTING.md says how to build, configure and run the service.
 - [x] The checks for this program in STANDARDS.md, "Before a package is done", pass.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -80,4 +80,18 @@ Create the lobby service program with its configuration, routing, logging and te
   - The `modernc.org/sqlite` driver is the one named in SERVICE.md 1. Its registered name is `sqlite`, checked in its source.
   - `TESTING.md` text says the binary must go outside the repository, because `.gitignore` re-includes `*.exe`.
 - Review findings and fixes:
-  - None yet. Reviewer to add.
+  - Build and checks reproduced on the merged branch: `gofmt -l .` is clean on the committed
+    sources (they are stored LF; a `.gitattributes` under `Servers/Lobby/` keeps them LF on
+    checkout so the check is deterministic on Windows), `go vet ./...` is clean, `go test ./...`
+    passes. Scope, contract (SERVICE/CLIENT_HTTP 7.1 keys and letter case), parameterised SQL and
+    commit hygiene all checked and correct.
+  - Three low-severity notes, none blocking; all accepted as-is or left to the package that will
+    consume the code:
+    1. `cmd/lobby/main.go`: only `ReadHeaderTimeout` is set. A client that sends headers and then
+       trickles the body, or keeps the connection idle, is not bounded. Left for L3, which adds the
+       WebSocket and its own deadlines; add `IdleTimeout` and a body/read deadline there.
+    2. `internal/api/logging.go`: the forwarded-for address is taken from the first header line.
+       SERVICE.md 11 wants the last entry, the one our own proxy adds. This only affects the log
+       line today. L2 reuses this for the per-address account limit and must take the last entry.
+    3. `internal/api/handler.go`: `HEAD /healthz` returns 404. SERVICE.md 2 names only GET, so this
+       is acceptable; no change.
