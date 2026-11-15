@@ -38,7 +38,7 @@ L4
 - [x] Tests cover two and three players, a missing pair, a late reply, a member leaving mid-check, and forwarding to a non-member.
 - [x] `lobbyprobe` now also answers message 27 as a connected client and waits for 28 before the host starts.
 - [x] The checks for this program in STANDARDS.md, "Before a package is done", pass.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -67,3 +67,19 @@ L4
   - A signal (12) for a target whose outbox is full, or whose connection is down, is dropped; the existing limit would otherwise disconnect the target for a flood sent by another member. 12 is not counted against the 60 messages a second (L3 rule), so this keeps a member from flooding another out.
   - Verified by running: `go test ./...`, and `lobbyprobe` against a started `lobby.exe` with `LOBBY_TURN_SECRET` set (all steps passed, including the new connectivity step; the secret did not appear in the log). Not verified: the real game client.
 - Review findings and fixes:
+  - Approved with no defects. `gofmt -l .` clean, `go vet ./...` clean, `go test ./...` passes. The TURN
+    credential scheme was checked against SERVICE 8.1 and recomputed independently: username is
+    `<expiry+6h>:<user id>` and the token is Base64(HMAC-SHA1(username, turn_secret)); the credentials are
+    empty when the secret is empty and the secret is never logged. After a join, 6 then 17 go to both
+    players of every new pair with all four keys; message 12 is forwarded only between two different
+    members of one lobby, with `target_user_id` set to the sender and the payload copied once; message 19
+    re-sends 17; a leave sends 18; message 26 runs the 8.3 connectivity check ending in 28 with
+    `mesh_complete` always present, a new 26 cancels one in progress, and a member leaving ends it. Every
+    message id and JSON key matches CLIENT_REALTIME 1.7. All shared hub and mesh-check state is under one
+    mutex with no socket write held under the lock, and the replaced-timer double-fire is guarded by map
+    identity and a step counter. The 60 messages/second cap correctly exempts 12 and 14 per SERVICE 6.3,
+    and a flood of 12s is dropped silently rather than amplified. Scope, author and commit hygiene correct.
+  - Pre-existing flaky tests (from L4, NOT introduced here): `TestLobbyChatReachesMembersWithEveryKeyAnd
+    AnnouncementRules` and `TestStartIsIgnoredUntilEveryHumanIsReady` in `internal/realtime` fail
+    intermittently on a socket-settle race; they pass on a re-run and also fail on unchanged `servers-go`.
+    Worth a later test-robustness pass; not an L5 defect.

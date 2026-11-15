@@ -45,7 +45,7 @@ After 0.2, tracks L, B and C can start together.
 | [L2](packages/L2-service-login.md) | Lobby service: accounts, login and tokens | L1 | done |
 | [L3](packages/L3-service-websocket.md) | Lobby service: WebSocket, rooms, room chat and names | L2 | done |
 | [L4](packages/L4-service-lobbies.md) | Lobby service: lobbies | L3 | done |
-| [L5](packages/L5-service-p2p.md) | Lobby service: player-to-player connection support | L4 | todo |
+| [L5](packages/L5-service-p2p.md) | Lobby service: player-to-player connection support | L4 | done |
 | [L6](packages/L6-service-server-lobbies.md) | Lobby service: server lobbies | L5 | todo |
 | [B1](packages/B1-own-service.md) | Client talks only to our own service | 0.2 | done |
 | [C1](packages/C1-client-link.md) | Client: relay link, entry check and region file, carried over | 0.2 | done |
@@ -106,4 +106,5 @@ The checks that need the game use the Debug configuration of the `win32-vcpkg-se
 | 2026-11-15 | D2 done: in Servers mode the create and join calls carry the entry-check pass, a refused pass shows the expired-check text, and the lobby list shows only server lobbies for the player's region. |
 | 2026-11-15 | L4 done: lobbies in the service — create, list, detail, join, field changes, ready, chat, the countdown lock and match start (message 13), with 6 to members and 7 to watchers after every change. The `max_players` shrink check refuses a change that would leave a human or an AI in a slot at or above the new limit, which is stricter than the stated count rule; SERVICE 7.3 is left unchanged. |
 | 2026-11-15 | D3 done: in Servers mode the entry check runs again on join, on Accept and on leaving a server lobby; a refusal shows the reason, closes the online session and returns to the main menu; a server lobby never offers a map transfer. The on-screen flow is verified by code and waits on a run with the game. |
+| 2026-11-15 | L5 done: the service issues TURN credentials in the lobby answers, pairs players after a join and relays their signalling, and runs the connectivity check before a match starts. |
 | 2026-11-15 | Package 0.2 merged. The Generals Online client builds with the `win32-vcpkg` preset. The `RTS_BUILD_OPTION_SERVERS` switch and the `win32-vcpkg-servers` preset are added. The relay and the client region files are carried over from the earlier work; the relay builds and `relay_tests` pass. |
