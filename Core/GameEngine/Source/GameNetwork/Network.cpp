@@ -779,7 +779,10 @@ void Network::update()
 	}
 
 	if (AllCommandsReady(TheGameLogic->getFrame())) { // If all the commands are ready for the next frame...
-		m_conMgr->handleAllCommandsReady();
+		// TheSuperHackers @bugfix Kayoti 15/11/2026 AllCommandsReady() returns TRUE when there is no connection manager yet, which happens on the host during the pregame/load phase. Do not notify through a null connection manager; RelayCommandsToCommandList and timeForNewFrame below already guard it the same way.
+		if (m_conMgr != NULL) {
+			m_conMgr->handleAllCommandsReady();
+		}
 		//		DEBUG_LOG(("Network::update - frame %d is ready", TheGameLogic->getFrame()));
 		if (timeForNewFrame()) { // This needs to come after any other pre-frame execution checks as this changes the timing variables.
 			RelayCommandsToCommandList(TheGameLogic->getFrame());	// Put the commands for the next frame on TheCommandList.
