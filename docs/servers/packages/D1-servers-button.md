@@ -47,7 +47,7 @@ B1, C1
 - [x] Everything is behind `RTS_SERVERS`. With the switch off there is no button and no `ServersMode` code. All new code is inside `#ifdef RTS_SERVERS`. Switch-off Release build exits 0.
 - [x] The entry check never runs for Online, Network, Skirmish or single player. `ServersEntryStart()` is called only from the `serversID` click; nothing else calls it.
 - [x] The checks for this program in STANDARDS.md, "Before a package is done", pass. Release switch on, Debug switch on and Release switch off all built with exit 0 (`z_generals`). clang-tidy not run (not on PATH). No new compiler warnings in the changed files.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -69,3 +69,17 @@ B1, C1
   - clang-tidy was not run (not on PATH).
   - PROTOCOL.md section 10: no assumption concerns this package.
 - Review findings and fixes:
+  - Verified: the `ServersMode` module has no GameSpy dependency; the pass is 200 lowercase hex into a
+    201-byte buffer (no overrun) and the region tag is exposed for D2; the Servers button is built at
+    runtime; the refusal texts and both ping values match PROTOCOL 4.4; the entry check starts only from
+    the Servers click; the Welcome screen hides Quick Match and the ladder in Servers mode without
+    reverting B1's edits; everything is behind `RTS_SERVERS` so the switch-off path is unchanged. Scope,
+    change-comment format, author and commit hygiene all correct. After merging, the client built clean
+    with the switch off (Release) and on (Release and Debug), all exit 0.
+  - Two low notes, neither blocking, no change made:
+    1. `MainMenu.cpp` Servers click does not set `dontAllowTransitions`/`buttonPushed` like the
+       Online/Network branches; it relies on the modal "Checking connection" box to swallow clicks, which
+       is how this engine's modal boxes behave. Safe; may set the guard flags for symmetry later.
+    2. `initServersButton` reads `onlineX` via `winGetPosition` but uses only `onlineY`. Cosmetic.
+  - The on-screen flow (button position, the modal check/refuse/pass transitions, the welcome-screen
+    hiding) needs the running game and is a Phase 1 menu check, not run here.
