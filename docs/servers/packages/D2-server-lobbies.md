@@ -43,7 +43,7 @@ D1
 - [x] The pass is never written to a log.
 - [x] Everything is behind `RTS_SERVERS`. With the switch off, requests and the list are exactly as before, and server lobbies are still hidden from the list. That one rule, hiding `LobbyType` 2, is compiled in every build.
 - [x] The checks for this program in STANDARDS.md, "Before a package is done", pass.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -64,3 +64,21 @@ D1
   - `JoinLobby` still creates a `NetworkMesh` for server lobbies (D50 concern; not in this package).
   - Region compare is exact (`Region` equals the tag).
 - Review findings and fixes:
+  - Verified: in Servers mode create sends `server_mode: true` and the `X-Servers-Pass` header, join
+    sends the pass header, and the Online create/join path is unchanged; the join refusal uses status 403
+    (the `SERVERS_STATUS_PASS_REFUSED` constant was confirmed equal to 403, matching the specification)
+    and shows the expired-check text without leaving the lobby list; the list filter runs first in
+    `RefreshGameListBox`'s completion, showing only `LobbyType` 2 with the player's region tag in Servers
+    mode and hiding type 2 from the Online list; the ladder combo is hidden in Servers mode; the pass is
+    never written to a log file. The body key, the header name and the `LobbyType` value match PROTOCOL
+    section 5 exactly. The lobby-list parse is wrapped so a malformed entry rejects the whole batch, and
+    the type and region are only compared, never used to index. Scope, author and commit hygiene correct.
+    After merging, the client built with the switch off (Release) and on (Release and Debug), all exit 0.
+  - One low note, no change: in Servers mode a create that returns success with a non-403 HTTP error and
+    a body that is not valid JSON falls into the pre-existing `catch(...)` and shows no text. This matches
+    the existing Online behaviour and is an unlikely service response; the realistic failures (no answer,
+    403, or a parseable non-success result) are all handled with the expired-check text.
+  - Two items left to their owners, confirmed outside D2: the Debug `curl` verbose option in
+    `HTTPRequest.cpp` (a Must-not-edit file) prints the pass and the authorization header to stderr in
+    Debug builds only — no log file receives the pass, so the "never written to a log" item holds; and
+    `JoinLobby` still builds a `NetworkMesh` for a server lobby (removing it belongs to match start, 2.1).
