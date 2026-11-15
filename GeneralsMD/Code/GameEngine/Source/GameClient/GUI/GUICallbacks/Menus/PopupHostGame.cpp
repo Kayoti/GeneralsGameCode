@@ -80,6 +80,9 @@
 #include "GameClient/MapUtil.h"
 #include "GameClient/GameWindow.h"
 #include "Common/QuotedPrintable.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServersMode.h"
+#endif
 
 //-----------------------------------------------------------------------------
 // DEFINES ////////////////////////////////////////////////////////////////////
@@ -380,6 +383,12 @@ void PopupHostGameInit( WindowLayout *layout, void *userData )
 	if (comboBoxLadderName)
 		GadgetComboBoxReset(comboBoxLadderName);
 	PopulateCustomLadderComboBox();
+
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 15/11/2026 Server lobbies have no ladder, so the choice is hidden in Servers mode.
+	if (ServersModeIsOn() && comboBoxLadderName)
+		comboBoxLadderName->winHide(TRUE);
+#endif
 
   checkBoxUseStatsID = TheNameKeyGenerator->nameToKey("PopupHostGame.wnd:CheckBoxUseStats");
   checkBoxUseStats = TheWindowManager->winGetWindowFromId(parentPopup, checkBoxUseStatsID);

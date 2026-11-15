@@ -62,6 +62,9 @@
 #include "Common/STLTypedefs.h"
 #include "GameNetwork/GeneralsOnline/NGMP_interfaces.h"
 #include "GameNetwork/GeneralsOnline/OnlineServices_LobbyInterface.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServersMode.h"
+#endif
 
 
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
@@ -1182,6 +1185,31 @@ static Int insertGame(GameWindow* win, LobbyEntry& lobbyInfo, Bool showMap)
 
 }
 
+// TheSuperHackers @feature Kayoti 15/11/2026 The list shows server lobbies of the player's region in Servers mode and all other lobbies otherwise (PROTOCOL.md 5.3).
+static Bool isLobbyShownInCurrentMode(const LobbyEntry& lobby)
+{
+	const Bool isServerLobby = (lobby.lobby_type == ELobbyType::Servers);
+#ifdef RTS_SERVERS
+	if (ServersModeIsOn())
+	{
+		return isServerLobby && lobby.region == ServersModeGetRegionTag();
+	}
+#endif
+	return !isServerLobby;
+}
+
+static void removeLobbiesHiddenInCurrentMode(std::vector<LobbyEntry>& lobbies)
+{
+	std::vector<LobbyEntry> shown;
+	shown.reserve(lobbies.size());
+	for (const LobbyEntry& lobby : lobbies)
+	{
+		if (isLobbyShownInCurrentMode(lobby))
+			shown.push_back(lobby);
+	}
+	lobbies = shown;
+}
+
 void RefreshGameListBox(GameWindow* win, Bool showMap)
 {
 	if (!win)
@@ -1218,6 +1246,8 @@ void RefreshGameListBox(GameWindow* win, Bool showMap)
 			// empty listbox
 			GadgetListBoxReset(win);
 			s_lobbyRowIDs.clear();
+
+			removeLobbiesHiddenInCurrentMode(vecLobbies);
 
 			size_t numResults = vecLobbies.size();
 
