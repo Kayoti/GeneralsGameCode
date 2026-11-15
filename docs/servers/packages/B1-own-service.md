@@ -52,7 +52,7 @@ Put every outside address of the client in one header, point them at our service
 - [x] `git grep -n -i -E "playgenerals|sentry\.io|gamereplays" -- "*.cpp" "*.h"` prints nothing outside comments that this package did not write.
 - [x] Two instances of a Debug build keep separate credential files, as they do today.
 - [x] The checks for this program in STANDARDS.md, "Before a package is done", pass. These changes are not behind the Servers switch.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -91,3 +91,4 @@ Put every outside address of the client in one header, point them at our service
   - `OnlineServices_RoomsInterface.cpp`: removed the unused `ToWide` and `ToUtf8` helpers and the unused `<psapi.h>`, `<wincrypt.h>`, `<softpub.h>` includes with their three `#pragma comment(lib, ...)` lines (searched: no other use in `GeneralsMD` or `Core`).
   - `DiscordRichPresence.cpp`: the previous team's Discord application id is replaced by an empty string; the only use is the `m_initialize` call, and presence is never started.
   - Rebuilt: `win32-vcpkg` Release, `win32-vcpkg-servers` Release and Debug, target `z_generals`, all linked, exit 0. Lint: not run.
+  - Reviewed twice. The first pass raised the three points above; after the fixes the second pass confirmed each is resolved, that no real service host, key or id is reachable (the only `example.net`/`127.0.0.1` placeholders and the `Servers Community` display name are compiled in), and that nothing under "Must not edit" was touched. After merging onto the current branch the client was built again from a clean tree with the switch off (Release) and on (Release and Debug); all three linked and `GeneralsOnlineZH.exe` was produced.

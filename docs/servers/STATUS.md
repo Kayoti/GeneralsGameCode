@@ -47,7 +47,7 @@ After 0.2, tracks L, B and C can start together.
 | [L4](packages/L4-service-lobbies.md) | Lobby service: lobbies | L3 | todo |
 | [L5](packages/L5-service-p2p.md) | Lobby service: player-to-player connection support | L4 | todo |
 | [L6](packages/L6-service-server-lobbies.md) | Lobby service: server lobbies | L5 | todo |
-| [B1](packages/B1-own-service.md) | Client talks only to our own service | 0.2 | todo |
+| [B1](packages/B1-own-service.md) | Client talks only to our own service | 0.2 | done |
 | [C1](packages/C1-client-link.md) | Client: relay link, entry check and region file, carried over | 0.2 | done |
 | [C2](packages/C2-client-records.md) | Client: match commands through the relay | C1 | todo |
 | [C3](packages/C3-client-flags.md) | Client: start a relay match from launch flags | C2, B1, D1 | todo |
@@ -99,4 +99,5 @@ The checks that need the game use the Debug configuration of the `win32-vcpkg-se
 | 2026-11-15 | L1 done: the lobby service skeleton, configuration reader, SQLite store and the fixed answers of SERVICE 5.2 plus VersionCheck and the health check. Go sources are pinned to LF on checkout. |
 | 2026-11-15 | C1 done: the relay link, entry check and region file reader carried over from `servers` and built as `core_serverlink` behind the Servers switch. Nothing calls it yet (C2 and D1 do). |
 | 2026-11-15 | L2 done: accounts, login codes, sessions and refresh tokens (SERVICE 4), the login requirement on the fixed calls, the per-address creation limit, and the `lobbyprobe` tool for the login path. |
+| 2026-11-15 | B1 done: the client's service addresses, STUN and TURN lists and display name are centralised in `ServiceHosts.h`; crash reporting, the Discord presence, the login browser step, the hardware identifiers, the anti-cheat probe and the update path are removed or made inert; player text uses the display name. |
 | 2026-11-15 | Package 0.2 merged. The Generals Online client builds with the `win32-vcpkg` preset. The `RTS_BUILD_OPTION_SERVERS` switch and the `win32-vcpkg-servers` preset are added. The relay and the client region files are carried over from the earlier work; the relay builds and `relay_tests` pass. |
