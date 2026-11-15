@@ -1,5 +1,6 @@
 // This file holds the WebSocket step of the probe: two accounts connect, join
-// the first room, chat and change a name (SERVICE.md sections 6 and 13).
+// the first room, chat and change a name (SERVICE.md sections 6 and 13). The
+// two accounts stay connected in the probe, for the lobby step that follows.
 
 package main
 
@@ -56,7 +57,7 @@ func (p *probe) webSocketRoom() error {
 		if err := p.connect(member); err != nil {
 			return p.fail("WebSocket connect", err)
 		}
-		defer member.socket.Close(websocket.StatusNormalClosure, "probe done")
+		p.members = append(p.members, member)
 	}
 	if err := p.report("WebSocket: two accounts connected"); err != nil {
 		return err

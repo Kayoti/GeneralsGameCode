@@ -72,7 +72,7 @@ func (hub *Hub) beginSession(userID int64, name string, isReconnect bool) (*play
 	if found {
 		hub.releasePlace(existing)
 	}
-	created := &player{userID: userID, name: name, roomID: roomNone}
+	created := &player{userID: userID, name: name, roomID: roomNone, lobbyID: noLobby}
 	hub.players[userID] = created
 	return created, true
 }
@@ -109,8 +109,8 @@ func (hub *Hub) attach(live *connection) bool {
 	if previous := target.conn; previous != nil {
 		go previous.closeWithFrame(websocket.StatusPolicyViolation, closeReasonReplaced)
 	}
-	keepOnlyNotices(target)
-	sortNotices(target)
+	keepHeldMessages(target)
+	sortHeldMessages(target)
 	target.conn = live
 	if len(target.outbox) > 0 {
 		live.wakeWriter()
@@ -130,7 +130,7 @@ func (hub *Hub) detach(ended *connection, clientClosed bool) {
 		return
 	}
 	target.conn = nil
-	keepOnlyNotices(target)
+	keepHeldMessages(target)
 	if clientClosed {
 		hub.releasePlace(target)
 		return
@@ -180,14 +180,15 @@ func (hub *Hub) expireHold(target *player, generation uint64) {
 }
 
 // releasePlace removes a player from the service: the live connection, if any,
-// is closed with a close frame, the player leaves their room, and the
-// place is forgotten. The caller holds hub.mu.
+// is closed with a close frame, the player leaves their lobby (SERVICE.md
+// section 7.4) and their room, and the place is forgotten. The caller holds hub.mu.
 func (hub *Hub) releasePlace(target *player) {
 	hub.stopHold(target)
 	if live := target.conn; live != nil {
 		target.conn = nil
 		go live.closeWithFrame(websocket.StatusPolicyViolation, closeReasonReplaced)
 	}
+	hub.leaveLobby(target)
 	hub.leaveRoom(target)
 	if hub.players[target.userID] == target {
 		delete(hub.players, target.userID)

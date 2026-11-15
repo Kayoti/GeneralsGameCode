@@ -104,6 +104,10 @@ func (routes *server) serve(w http.ResponseWriter, r *http.Request) {
 		handle(w, r)
 		return
 	}
+	if handle, found := routes.lobbyCallFor(r.Method, segments); found {
+		handle(w, r)
+		return
+	}
 	answer, ok := fixedAnswerFor(r.Method, segments)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, emptyObject)

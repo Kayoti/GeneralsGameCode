@@ -3,23 +3,25 @@
 
 package realtime
 
-import (
-	"strings"
-	"unicode"
-	"unicode/utf8"
-)
-
 // Message ids of CLIENT_REALTIME.md section 1.7. The two notices are exported
 // because the lobby code sends them through Hub.Notify.
 const (
-	msgRoomChatFromClient = 1
-	msgRoomChatFromServer = 2
-	msgRoomChange         = 3
-	msgRoomMemberList     = 4
-	msgSignal             = 12
-	msgPlayerNameChange   = 9
-	msgPing               = 14
-	msgPong               = 15
+	msgRoomChatFromClient  = 1
+	msgRoomChatFromServer  = 2
+	msgRoomChange          = 3
+	msgRoomMemberList      = 4
+	msgMarkReady           = 5
+	msgPlayerNameChange    = 9
+	msgLobbyChatFromClient = 10
+	msgLobbyChatFromServer = 11
+	msgSignal              = 12
+	msgStartGame           = 13
+	msgPing                = 14
+	msgPong                = 15
+	msgCountdownStarted    = 23
+	msgRemovePassword      = 24
+	msgChangePassword      = 25
+	msgConnectivityCheck   = 26
 
 	// MsgLobbyCurrentLobbyUpdate tells a lobby member to fetch the lobby again.
 	MsgLobbyCurrentLobbyUpdate = 6
@@ -90,20 +92,37 @@ type memberListMessage struct {
 	RequestID          uint64        `json:"request_id"`
 }
 
-// cleanText prepares player text (SERVICE.md section 3): control characters
-// are removed, the ends are trimmed, and at most maxCharacters characters are
-// kept. Invalid UTF-8 has already been replaced when the JSON was decoded.
-func cleanText(text string, maxCharacters int) string {
-	withoutControls := strings.Map(func(character rune) rune {
-		if unicode.IsControl(character) {
-			return -1
-		}
-		return character
-	}, text)
-	trimmed := strings.TrimSpace(withoutControls)
-	if utf8.RuneCountInString(trimmed) <= maxCharacters {
-		return trimmed
-	}
-	kept := []rune(trimmed)[:maxCharacters]
-	return string(kept)
+// markReadyRequest is message 5. Ready is a pointer so that a missing key is told from false.
+type markReadyRequest struct {
+	Ready *bool `json:"ready"`
+}
+
+// lobbyChatRequest is message 10.
+type lobbyChatRequest struct {
+	Message                *string `json:"message"`
+	Action                 bool    `json:"action"`
+	Announcement           bool    `json:"announcement"`
+	ShowAnnouncementToHost bool    `json:"show_announcement_to_host"`
+}
+
+// lobbyChatMessage is message 11 with every key the client reads.
+type lobbyChatMessage struct {
+	MsgID                  int    `json:"msg_id"`
+	Message                string `json:"message"`
+	Action                 bool   `json:"action"`
+	Announcement           bool   `json:"announcement"`
+	ShowAnnouncementToHost bool   `json:"show_announcement_to_host"`
+	UserID                 int64  `json:"user_id"`
+}
+
+// changePasswordRequest is message 25.
+type changePasswordRequest struct {
+	NewPassword *string `json:"new_password"`
+}
+
+// startGameMessage is message 13 from the service (CLIENT_REALTIME.md 1.7). The
+// screenshot address is always empty (SERVICE.md section 7.5).
+type startGameMessage struct {
+	MsgID         int    `json:"msg_id"`
+	ScreenshotURL string `json:"screenshot_url"`
 }

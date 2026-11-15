@@ -2,7 +2,8 @@
 // the game client calls them (SERVICE.md section 13). It runs VersionCheck,
 // LoginCode, CheckLogin, RefreshToken and LoginWithToken in that order, then
 // connects the WebSocket for two accounts, joins room 1, exchanges a chat line
-// and changes a name. It prints one line per step, and exits with status 1 at
+// and changes a name, then has the first account create a lobby, the second
+// find it in the list and join it, and the first start the match. It prints one line per step, and exits with status 1 at
 // the first step that fails. It never prints a token.
 //
 // Usage: lobbyprobe --url <base address> --env <environment>
@@ -20,6 +21,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 // requestTimeout limits one call to the service.
@@ -47,6 +50,8 @@ type probe struct {
 	session  string
 	refresh  string
 	userID   float64
+	// members are the two accounts the WebSocket step connected, in room 1.
+	members []*account
 }
 
 func main() {
@@ -74,13 +79,22 @@ func run(baseURL string, env string, out io.Writer) error {
 		p.refreshToken,
 		p.loginWithToken,
 		p.webSocketRoom,
+		p.lobbyToMatchStart,
 	}
+	defer p.closeSockets()
 	for _, step := range steps {
 		if err := step(); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// closeSockets closes the WebSocket of every account the probe connected.
+func (p *probe) closeSockets() {
+	for _, member := range p.members {
+		member.socket.Close(websocket.StatusNormalClosure, "probe done")
+	}
 }
 
 // versionCheck sends the four request keys of CLIENT_HTTP.md 4.1 and expects no update.

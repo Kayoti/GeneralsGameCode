@@ -13,12 +13,16 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"servers-lobby/internal/lobbies"
 )
 
 // Defaults of Settings (SERVICE.md sections 6.1 and 6.2).
 const (
 	defaultIdleTimeout   = 30 * time.Second
 	defaultReconnectHold = 45 * time.Second
+	// defaultCountdownLock is how long message 23 locks a lobby (SERVICE.md section 6.3).
+	defaultCountdownLock = 25 * time.Second
 	// defaultWriteTimeout is not set by the documents. It stops a client that
 	// does not read from holding a writer goroutine for ever.
 	defaultWriteTimeout = 10 * time.Second
@@ -38,6 +42,8 @@ type Settings struct {
 	ReconnectHold time.Duration
 	// WriteTimeout limits one write to a client.
 	WriteTimeout time.Duration
+	// CountdownLock is how long a countdown (message 23) locks a lobby.
+	CountdownLock time.Duration
 }
 
 // DefaultSettings returns the settings of SERVICE.md with the given room names.
@@ -47,6 +53,7 @@ func DefaultSettings(rooms []string) Settings {
 		IdleTimeout:   defaultIdleTimeout,
 		ReconnectHold: defaultReconnectHold,
 		WriteTimeout:  defaultWriteTimeout,
+		CountdownLock: defaultCountdownLock,
 	}
 }
 
@@ -65,12 +72,20 @@ type Room struct {
 }
 
 // outgoing is a message waiting to be written to a client. A notice is a
-// message with no fields: it is kept while the player is disconnected, and
-// only one identical notice waits at a time (SERVICE.md section 6.1).
+// message with no fields: only one identical notice waits at a time
+// (SERVICE.md section 6.1). A notice, and a held message such as the match
+// start (13), is kept while the player is disconnected (SERVICE.md section 6.2).
 type outgoing struct {
 	msgID  int
 	data   []byte
 	notice bool
+	held   bool
+}
+
+// survivesDisconnect reports whether the message waits for a player whose
+// connection has ended.
+func (message outgoing) survivesDisconnect() bool {
+	return message.notice || message.held
 }
 
 // player is an account that has a place on the service: the live connection,
@@ -79,8 +94,10 @@ type player struct {
 	userID int64
 	name   string
 	roomID int
-	conn   *connection
-	outbox []outgoing
+	// lobbyID is the lobby the player is in, or noLobby (SERVICE.md section 7).
+	lobbyID int64
+	conn    *connection
+	outbox  []outgoing
 
 	holdTimer      *time.Timer
 	holdGeneration uint64
@@ -96,6 +113,9 @@ type Hub struct {
 	mu          sync.Mutex
 	players     map[int64]*player
 	roomMembers map[int]map[int64]*player
+	lobbies     map[int64]*lobbies.Lobby
+	nextLobbyID int64
+	nextMatchID uint64
 }
 
 // NewHub returns a Hub with the given settings. Room ids are given to
@@ -115,6 +135,9 @@ func NewHub(settings Settings, accounts Accounts, logger *slog.Logger) *Hub {
 		rooms:       rooms,
 		players:     make(map[int64]*player),
 		roomMembers: roomMembers,
+		lobbies:     make(map[int64]*lobbies.Lobby),
+		nextLobbyID: firstLobbyID,
+		nextMatchID: firstMatchID,
 	}
 }
 
@@ -130,25 +153,31 @@ func (hub *Hub) Rooms() []Room {
 // 6.1). A player who is disconnected keeps the notice until the place is
 // released. An unknown player is ignored.
 func (hub *Hub) Notify(userID int64, msgID int) {
-	data, err := json.Marshal(noticeMessage{MsgID: msgID})
-	if err != nil {
-		hub.logger.Error("encode notice", "msgId", msgID, "error", err)
-		return
-	}
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
 	target, found := hub.players[userID]
 	if !found {
 		return
 	}
+	hub.notifyLocked(target, msgID)
+}
+
+// notifyLocked is Notify for a player the caller has already found, with
+// hub.mu held, for code that sends notices while it changes shared state.
+func (hub *Hub) notifyLocked(target *player, msgID int) {
+	data, err := json.Marshal(noticeMessage{MsgID: msgID})
+	if err != nil {
+		hub.logger.Error("encode notice", "msgId", msgID, "error", err)
+		return
+	}
 	hub.enqueue(target, outgoing{msgID: msgID, data: data, notice: true})
 }
 
 // enqueue puts a message in a player's outbox and wakes the writer. A
-// message that is not a notice is dropped while the player has no connection.
+// message that does not survive a disconnect is dropped while the player has no connection.
 // A client whose outbox is full is dropped. The caller holds hub.mu.
 func (hub *Hub) enqueue(target *player, message outgoing) {
-	if target.conn == nil && !message.notice {
+	if target.conn == nil && !message.survivesDisconnect() {
 		return
 	}
 	if message.notice && hasWaitingNotice(target.outbox, message.msgID) {
@@ -177,22 +206,23 @@ func hasWaitingNotice(outbox []outgoing, msgID int) bool {
 	return false
 }
 
-// keepOnlyNotices removes from the outbox every message that is not a notice.
-// A message written for a connection that has ended is not sent to the next
-// one (SERVICE.md section 6.2 keeps only notices). The caller holds hub.mu.
-func keepOnlyNotices(target *player) {
+// keepHeldMessages removes from the outbox every message that does not
+// survive a disconnect. A message written for a connection that has ended is
+// not sent to the next one (SERVICE.md section 6.2 keeps only 6, 7 and 13).
+// The caller holds hub.mu.
+func keepHeldMessages(target *player) {
 	kept := target.outbox[:0]
 	for _, waiting := range target.outbox {
-		if waiting.notice {
+		if waiting.survivesDisconnect() {
 			kept = append(kept, waiting)
 		}
 	}
 	target.outbox = kept
 }
 
-// sortNotices puts the waiting notices in id order, so a reconnecting client
-// gets 6 before 7 (SERVICE.md section 6.2). The caller holds hub.mu.
-func sortNotices(target *player) {
+// sortHeldMessages puts the waiting messages in id order, so a reconnecting
+// client gets 6, then 7, then 13 (SERVICE.md section 6.2). The caller holds hub.mu.
+func sortHeldMessages(target *player) {
 	sort.SliceStable(target.outbox, func(first, second int) bool {
 		return target.outbox[first].msgID < target.outbox[second].msgID
 	})
