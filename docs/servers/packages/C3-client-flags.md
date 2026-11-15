@@ -45,7 +45,7 @@ C2, B1, D1. B1 and D1 edit two of the same files (`GameEngine.cpp`, the engine's
 - [x] TESTING.md is updated to this base: build commands, where the built executable is, the flags, and the two-instance steps. It says that one-PC checks use the Debug configuration of the `win32-vcpkg-servers` preset, and that the test relay runs with `--no-address-check` and with the entry check, `CREATE` and `JOIN` rate limits raised, because every instance shares one address. (See "Where the built executable is" and "Relay configuration for one PC".)
 - [ ] Live check, if the game data is installed on this machine: a host and a joiner on one PC reach a running match through a local relay, and the relay log shows the session started with 2 players. Pending: needs the game installed (Phase 2 gate per the coordinator). The code path is in place and verified statically.
 - [x] The checks for this program in STANDARDS.md, "Before a package is done", pass. (Builds with the Servers switch on in Release and Debug and off in Release, all `exit 0`; no new compiler warnings on the changed files. Lint not run: clang-tidy is not on PATH and the binary is absent at the MSVC LLVM path, and no PCH-free analysis build is set up.)
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -73,3 +73,24 @@ C2, B1, D1. B1 and D1 edit two of the same files (`GameEngine.cpp`, the engine's
   - PROTOCOL.md section 10 assumptions: none are C3's to confirm (V2/V8/V9 belong to C2, and would only be exercised by the pending live run). None confirmed or disproved here.
   - The two new files are authored fresh (informed by `servers:.../ServersDirect.*`) rather than carried with `git checkout servers --`, because the path moved Core -> GeneralsMD and the `.cpp` is a redesign for the `TheNGMPGame` base; carrying verbatim across a different path with a near-total rewrite would not have been reviewable as a clean diff.
 - Review findings and fixes:
+  - Approved. The reviewer verified the critical server-mode ordering: `NGMPGame::launchServersDirect`
+    calls `setServerMode(TRUE)` and attaches the relay link before `initTransport`, which returns early in
+    server mode, so no unused transport is ever constructed and the mesh guards apply (`setServerMode`
+    cannot precede `init` because the ConnectionManager is created inside `Network::init`, and `init`
+    neither resets server mode nor builds a transport). The launch-on-`CREATED`/`WELCOME` timing is safe,
+    not a premature start: records before `START` are dropped by `queueServerRecord` and only
+    `updateServerMode`'s `TYPE_START` sets `m_serverStarted`, so the link must be attached before `START`
+    arrives; the simulation stays gated until `START`. The nine flags validate their ranges (slot 0-7,
+    players 2-8, port 1-65535, session/token up to 16 hex, exactly one of host/join, joiner needs
+    session+token); a bad or missing flag logs and starts the menu normally, sending nothing; the direct
+    path builds no online-service objects and never contacts the lobby service; the fixed match values
+    match TESTING.md. Scope (exactly the nine allowed files; one `ServersDirectUpdate()` call before
+    `TheNetwork->UPDATE()`), author and commit hygiene all correct.
+  - Two low notes, no change: the dev-only launch failure/title text in `ServersDirect.cpp` is hardcoded
+    English rather than fetched from `GameText` (this path is command-line only); the `parseNumber`
+    hex pre-filter permits `a-f` and a `0x` prefix, which is harmless because the trailing-character check
+    rejects any non-decimal digit for base-10 fields and every value is bounded.
+  - After merge the client was rebuilt (switch off Release, switch on Release and Debug); all three exit 0
+    and the Servers executables were produced.
+  - The live two-instance relay match (Done-when item 9) is run separately by the coordinator against the
+    installed game; its result is recorded in the Phase 1 check table and the status log.
