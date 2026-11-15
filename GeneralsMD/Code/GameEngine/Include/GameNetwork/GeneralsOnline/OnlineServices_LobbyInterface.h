@@ -241,6 +241,14 @@ public:
 
 	void UpdateCurrentLobby_ForceReady();
 
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 15/11/2026 Posts the server session (field 19) of a server lobby: the session id and
+	// one join token per other human slot (SERVICE.md section 10). onComplete is called with true only when the service
+	// answered result 1. slots and tokens are parallel lists of the same length.
+	void SendServerSession(const AsciiString& serverSessionHex, const std::vector<int>& slots,
+		const std::vector<AsciiString>& tokens, std::function<void(bool bStored)> onComplete);
+#endif
+
 	void SetLobbyListDirty()
 	{
 		m_bLobbyListDirty.store(true);

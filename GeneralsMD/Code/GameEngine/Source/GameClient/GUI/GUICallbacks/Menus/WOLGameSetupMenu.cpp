@@ -969,6 +969,54 @@ static void handleLimitSuperweaponsClick()
 #endif
 }
 
+// TheSuperHackers @feature Kayoti 15/11/2026 Launches the current NGMP game. Extracted so the Online start-message
+// path and the server-lobby launch install the lobby game the same way. Used in both builds.
+static void launchCurrentNGMPGame()
+{
+	NGMP_OnlineServices_LobbyInterface* pLobbyInterface = NGMP_OnlineServicesManager::GetInterface<NGMP_OnlineServices_LobbyInterface>();
+	NGMPGame* myGame = pLobbyInterface == nullptr ? nullptr : pLobbyInterface->GetCurrentGame();
+
+	if (pLobbyInterface == nullptr || !myGame || !myGame->isInGame() || !TheNGMPGame)
+		return;
+
+	GameWindow* buttonBuddy = TheWindowManager->winGetWindowFromId(NULL, NAMEKEY("GameSpyGameOptionsMenu.wnd:ButtonCommunicator"));
+	if (buttonBuddy)
+		buttonBuddy->winEnable(FALSE);
+	GameSpyCloseOverlay(GSOVERLAY_BUDDY);
+	GameSpyCloseOverlay(GSOVERLAY_PLAYERINFO);
+
+	*TheNGMPGame = *myGame;
+	TheNGMPGame->startGame(0);
+}
+
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 15/11/2026 Helpers for the server-lobby match start (PROTOCOL.md 5.4).
+
+// True when the current lobby is a server lobby, whose match runs through the relay.
+static Bool inServerLobby()
+{
+	NGMP_OnlineServices_LobbyInterface* pLobbyInterface = NGMP_OnlineServicesManager::GetInterface<NGMP_OnlineServices_LobbyInterface>();
+	return ServersModeIsOn() && pLobbyInterface != nullptr
+		&& pLobbyInterface->GetCurrentLobby().lobby_type == ELobbyType::Servers;
+}
+
+// The number of human members of the current lobby.
+static Int countServerLobbyHumans()
+{
+	NGMP_OnlineServices_LobbyInterface* pLobbyInterface = NGMP_OnlineServicesManager::GetInterface<NGMP_OnlineServices_LobbyInterface>();
+	if (pLobbyInterface == nullptr)
+		return 0;
+
+	Int count = 0;
+	for (const LobbyMemberEntry& member : pLobbyInterface->GetCurrentLobby().members)
+	{
+		if (member.IsHuman())
+			++count;
+	}
+	return count;
+}
+#endif
+
 static void WOLLockSettings()
 {
 	buttonBack->winEnable(false);
@@ -1005,6 +1053,20 @@ static void StartPressed()
 		return;
 	}
 
+#ifdef RTS_SERVERS
+	// A server lobby needs at least two human players to start (PROTOCOL.md 5.4 step 1).
+	if (inServerLobby() && countServerLobbyHumans() < 2)
+	{
+		UnicodeString text = TheGameText->FETCH_OR_SUBSTITUTE("GUI:ServersNeedTwoPlayers", L"A server match needs at least two human players.");
+		GadgetListBoxAddEntryText(listboxGameSetupChat, text, GameSpyColor[GSCOLOR_DEFAULT], -1, -1);
+		return;
+	}
+
+	// A server lobby opens no player-to-player connections, so the "still connecting" test would never pass
+	// (PROTOCOL.md 5.4 step 2). The connectivity check below still runs; the service answers it as complete at once.
+	if (!inServerLobby())
+#endif
+	{
 	int numHumanPlayers = 0;
 	for(LobbyMemberEntry & member : pLobbyInterface->GetCurrentLobby().members)
 	{
@@ -1019,7 +1081,7 @@ static void StartPressed()
 		UnicodeString text(L"Connections: Some players are still connecting. Try again shortly:");
 		GadgetListBoxAddEntryText(listboxGameSetupChat, text, GameMakeColor(255, 194, 15, 255), -1, -1);
 
-		
+
 		int64_t myUserID = pAuthInterface->GetUserID();
 		auto vecLobbyMembers = pLobbyInterface->GetCurrentLobby().members;
 		auto allConnections = pMesh->GetAllConnections();
@@ -1035,7 +1097,7 @@ static void StartPressed()
 					// we have a connection for this lobby member
 					bFoundLobbyMemberForConnection = true;
 				}
-				
+
 				if (!bFoundLobbyMemberForConnection)
 				{
 					UnicodeString strDisplayName(from_utf8(lobbyMember.display_name).c_str());
@@ -1043,8 +1105,9 @@ static void StartPressed()
 				}
 			}
 		}
-		
+
 		return;
+	}
 	}
 
 	// see if everyone's accepted and count the number of players in the game
@@ -1886,6 +1949,12 @@ Bool initialAcceptEnable = FALSE;
 //-------------------------------------------------------------------------------------------------
 void WOLGameSetupMenuInit( WindowLayout *layout, void *userData )
 {
+#ifdef RTS_SERVERS
+	// Start the staging screen with no leftover match-start state. The launch takes the relay link, so this does
+	// not touch a link that a running match now owns.
+	ServersMatchReset();
+#endif
+
 	NGMP_OnlineServices_LobbyInterface* pLobbyInterface = NGMP_OnlineServicesManager::GetInterface<NGMP_OnlineServices_LobbyInterface>();
 	if (pLobbyInterface == nullptr)
 	{
@@ -2029,14 +2098,19 @@ void WOLGameSetupMenuInit( WindowLayout *layout, void *userData )
 			// TODO_NGMP
 			//SendStatsToOtherPlayers(TheNGMPGame);
 
-			GameWindow* buttonBuddy = TheWindowManager->winGetWindowFromId(NULL, NAMEKEY("GameSpyGameOptionsMenu.wnd:ButtonCommunicator"));
-			if (buttonBuddy)
-				buttonBuddy->winEnable(FALSE);
-			GameSpyCloseOverlay(GSOVERLAY_BUDDY);
-			GameSpyCloseOverlay(GSOVERLAY_PLAYERINFO);
+#ifdef RTS_SERVERS
+			// A server lobby does not launch on the start message. The host drives its own start (begun when the
+			// countdown ended), so its own start message is informational; a member connects to the relay with the
+			// token this message carried. Both launch on the relay's START, driven by updateServersMatchStart().
+			if (inServerLobby())
+			{
+				if (!pLobbyInterface->IsHost())
+					ServersMatchBeginMemberFromStartMessage();
+				return;
+			}
+#endif
 
-			*TheNGMPGame = *myGame;
-			TheNGMPGame->startGame(0);
+			launchCurrentNGMPGame();
 		});
 
 
@@ -2491,6 +2565,48 @@ static void updateServersGate()
 		s_serversAcceptCheckPassed = FALSE;
 	}
 }
+
+// TheSuperHackers @feature Kayoti 15/11/2026 Drives the server-lobby match start each frame (PROTOCOL.md 5.4). The relay
+// handshake, the service calls and the timeouts live in ServersMode; here we act on the outcome and keep Start unavailable
+// with fewer than two human players.
+static void updateServersMatchStart()
+{
+	NGMP_OnlineServices_LobbyInterface* pLobbyInterface = NGMP_OnlineServicesManager::GetInterface<NGMP_OnlineServices_LobbyInterface>();
+
+	// Keep Start unavailable for the host with fewer than two humans (PROTOCOL.md 5.4 step 1).
+	if (!ServersMatchIsActive() && buttonStart != nullptr && inServerLobby()
+		&& pLobbyInterface != nullptr && pLobbyInterface->IsHost() && countServerLobbyHumans() < 2)
+	{
+		buttonStart->winEnable(FALSE);
+	}
+
+	if (!ServersMatchIsActive())
+		return;
+
+	const ServersMatchOutcome outcome = ServersMatchUpdate();
+	if (outcome == SERVERS_MATCH_LAUNCH)
+	{
+		launchCurrentNGMPGame();
+	}
+	else if (outcome == SERVERS_MATCH_ABORTED)
+	{
+		// The match did not start. Keep the lobby open and re-enable the host controls.
+		GadgetListBoxAddEntryText(listboxGameSetupChat, ServersMatchGetMessage(), GameMakeColor(255, 194, 15, 255), -1, -1);
+		if (buttonStart != nullptr)
+			buttonStart->winEnable(TRUE);
+		if (buttonBack != nullptr)
+			buttonBack->winEnable(TRUE);
+		GameWindow* buttonBuddy = TheWindowManager->winGetWindowFromId(NULL, NAMEKEY("GameSpyGameOptionsMenu.wnd:ButtonCommunicator"));
+		if (buttonBuddy != nullptr)
+			buttonBuddy->winEnable(TRUE);
+	}
+	else if (outcome == SERVERS_MATCH_FAILED)
+	{
+		// Could not join the match: leave the lobby and return to the lobby list (PROTOCOL.md 5.4 step 10).
+		GSMessageBoxOk(TheGameText->FETCH_OR_SUBSTITUTE("GUI:ServersTitle", L"Servers"), ServersMatchGetMessage());
+		PopBackToLobby();
+	}
+}
 #endif
 
 //-------------------------------------------------------------------------------------------------
@@ -2518,9 +2634,12 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 
 #ifdef RTS_SERVERS
 	if (ServersModeIsOn())
+	{
 		updateServersGate();
+		updateServersMatchStart();
+	}
 #endif
-	
+
 	// We'll only be successful if we've requested to
 	if(isShuttingDown && TheShell->isAnimFinished() && TheTransitionHandler->isFinished())
 	{
@@ -2679,11 +2798,29 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 					// stop countdown
 					TheNGMPGame->StopCountdown();
 
-					// send start game packet
-					std::shared_ptr<WebSocket>  pWS = NGMP_OnlineServicesManager::GetWebSocket();
-					if (pWS != nullptr)
+#ifdef RTS_SERVERS
+					// A server lobby does not send the start message yet: the host opens the relay session first and
+					// sends the start message only after the service stores the join tokens (PROTOCOL.md 5.4 step 3).
+					if (inServerLobby())
 					{
-						pWS->SendData_StartGame();
+						GadgetListBoxAddEntryText(listboxGameSetupChat,
+							TheGameText->FETCH_OR_SUBSTITUTE("GUI:ServersContacting", L"Contacting server"),
+							GameMakeColor(255, 194, 15, 255), -1, -1);
+						if (buttonStart != nullptr)
+							buttonStart->winEnable(FALSE);
+						if (buttonBack != nullptr)
+							buttonBack->winEnable(FALSE);
+						ServersMatchBeginHost();
+					}
+					else
+#endif
+					{
+						// send start game packet
+						std::shared_ptr<WebSocket>  pWS = NGMP_OnlineServicesManager::GetWebSocket();
+						if (pWS != nullptr)
+						{
+							pWS->SendData_StartGame();
+						}
 					}
 				}
 			}

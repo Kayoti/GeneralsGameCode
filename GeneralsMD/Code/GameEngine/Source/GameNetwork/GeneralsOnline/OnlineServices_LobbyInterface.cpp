@@ -93,7 +93,9 @@ enum class ELobbyUpdateField
 	AI_TEAM = 15,
 	AI_START_POS = 16,
 	MAX_CAMERA_HEIGHT = 17,
-	JOINABILITY = 18
+	JOINABILITY = 18,
+	// TheSuperHackers @feature Kayoti 15/11/2026 The host posts the relay session of a server lobby here (SERVICE.md section 10).
+	SERVER_SESSION = 19
 };
 
 void NGMP_OnlineServices_LobbyInterface::UpdateCurrentLobby_Map(UnicodeString strMap, AsciiString strMapPath, bool bIsOfficial, int newMaxPlayers)
@@ -511,6 +513,58 @@ void NGMP_OnlineServices_LobbyInterface::UpdateCurrentLobby_ForceReady()
 			SendAnnouncementMessageToCurrentLobby(msg, true);
 		});
 }
+
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 15/11/2026 Posts the server session (field 19) and reports whether the service stored it.
+// The body carries the session id and the join tokens, so it is kept out of the HTTP request log (HTTPRequest.cpp).
+void NGMP_OnlineServices_LobbyInterface::SendServerSession(const AsciiString& serverSessionHex, const std::vector<int>& slots,
+	const std::vector<AsciiString>& tokens, std::function<void(bool bStored)> onComplete)
+{
+	if (slots.size() != tokens.size())
+	{
+		if (onComplete != nullptr)
+			onComplete(false);
+		return;
+	}
+
+	std::string strURI = std::format("{}/{}", NGMP_OnlineServicesManager::GetAPIEndpoint("Lobby"), m_CurrentLobby.lobbyID);
+	std::map<std::string, std::string> mapHeaders;
+
+	nlohmann::json j;
+	j["field"] = ELobbyUpdateField::SERVER_SESSION;
+	j["server_session"] = serverSessionHex.str();
+	nlohmann::json jTokens = nlohmann::json::array();
+	for (size_t i = 0; i < slots.size(); ++i)
+	{
+		nlohmann::json jToken;
+		jToken["slot"] = slots[i];
+		jToken["token"] = tokens[i].str();
+		jTokens.push_back(jToken);
+	}
+	j["tokens"] = jTokens;
+	std::string strPostData = j.dump();
+
+	NGMP_OnlineServicesManager::GetInstance()->GetHTTPManager()->SendPOSTRequest(strURI.c_str(), EIPProtocolVersion::DONT_CARE, mapHeaders, strPostData.c_str(), [onComplete](bool bSuccess, int statusCode, std::string strBody, HTTPRequest* pReq)
+		{
+			bool bStored = false;
+			if (bSuccess)
+			{
+				try
+				{
+					nlohmann::json jsonObject = nlohmann::json::parse(strBody);
+					bStored = jsonObject.value("result", 0) == 1;
+				}
+				catch (...)
+				{
+					bStored = false;
+				}
+			}
+
+			if (onComplete != nullptr)
+				onComplete(bStored);
+		});
+}
+#endif
 
 void NGMP_OnlineServices_LobbyInterface::SendChatMessageToCurrentLobby(UnicodeString& strChatMsgUnicode, bool bIsAction)
 {
