@@ -186,6 +186,8 @@ private:
 	void sendServerModeCommand(NetCommandMsg *msg, UnsignedByte relay);	///< Server mode replacement for the send paths: add to local frame data and queue a record.
 	void queueServerRecord(NetCommandMsg *msg, UnsignedByte relay, UnsignedInt recordSize);	///< Append one carried command as a record to the outgoing DATA buffer.
 	void flushServerSend();																///< Send the queued records as one DATA message.
+	void flushServerPending();															///< Replay the records held before START through the send path, in order, then empty the hold buffer.
+	void clearServerPending();															///< Release any held pre-START records without sending them.
 	void processServerDataMessage(const UnsignedByte *data, UnsignedInt length);	///< Split a received DATA message into records.
 	void processServerRecord(const UnsignedByte *data, UnsignedInt length);	///< Turn one received record back into a command and apply it.
 	void handleServerDrop(UnsignedByte slot, UnsignedInt lastFrame);		///< Apply a DROP from the relay (PROTOCOL.md 4.7).
@@ -252,6 +254,9 @@ private:
 	ServerLink *m_serverLink;									///< The relay match connection. Not owned. Null until attachServerLink.
 	UnsignedInt m_serverSendLength;						///< Bytes currently held in m_serverSendBuffer.
 	UnsignedByte m_serverSendBuffer[16383];		///< Outgoing records, one DATA message at a time (PROTOCOL.md 6: at most 16383 bytes of records).
+	NetCommandRef *m_serverPending[256];			///< Carried records produced before START, held in order and replayed once START arrives. The host finishes loading and runs its early frames before START, so these would otherwise be dropped by the pre-START gate.
+	UnsignedInt m_serverPendingSize[256];			///< Net-packet size of each held record, kept alongside m_serverPending so the replay matches the original bytes.
+	UnsignedInt m_serverPendingCount;				///< Number of records currently held in m_serverPending.
 #endif
 
 	// -----------------------------------------------------------------------------

@@ -74,7 +74,8 @@ enum
 	SERVER_MIN_RUN_AHEAD = 4,		///< RUNAHEAD run_ahead lower bound.
 	SERVER_MAX_RUN_AHEAD = 64,		///< RUNAHEAD run_ahead upper bound.
 	SERVER_MIN_FRAME_RATE = 5,		///< RUNAHEAD frame_rate lower bound.
-	SERVER_MAX_FRAME_RATE = 60		///< RUNAHEAD frame_rate upper bound.
+	SERVER_MAX_FRAME_RATE = 60,		///< RUNAHEAD frame_rate upper bound.
+	SERVER_MAX_PENDING_RECORDS = 256	///< Most carried records held before START. The host only produces its early zero-frames plus a couple of control records, so this is ample; past it, fall back to dropping.
 };
 
 // TheSuperHackers @feature Kayoti 15/11/2026 The command types carried as match records (PROTOCOL.md 4.6). Everything else is "Not carried".
@@ -309,6 +310,7 @@ ConnectionManager::ConnectionManager()
 	m_serverStarted = FALSE;
 	m_serverLink = nullptr;
 	m_serverSendLength = 0;
+	m_serverPendingCount = 0;
 #endif
 }
 
@@ -370,6 +372,7 @@ void ConnectionManager::init()
 	// TheSuperHackers @feature Kayoti 15/11/2026 Reset the per-match relay record state. m_serverMode and m_serverLink are set after init.
 	m_serverStarted = FALSE;
 	m_serverSendLength = 0;
+	clearServerPending();
 #endif
 
 	TheDisconnectMenu = NEW DisconnectMenu;
@@ -457,6 +460,7 @@ void ConnectionManager::reset()
 	// TheSuperHackers @feature Kayoti 15/11/2026 Reset the per-match relay record state.
 	m_serverStarted = FALSE;
 	m_serverSendLength = 0;
+	clearServerPending();
 #endif
 }
 
@@ -1408,6 +1412,11 @@ void ConnectionManager::updateServerMode(Bool isInGame)
 				case ServerLinkEvent::TYPE_START:
 					m_packetRouterSlot = event.leaderSlot;
 					m_serverStarted = TRUE;
+					// TheSuperHackers @bugfix Kayoti 15/11/2026 The host launches on CREATED, long before START, so
+					// it finishes loading and runs its early frames while m_serverStarted is still FALSE. Those records
+					// (its LOADCOMPLETE and the early zero-frames) were held by queueServerRecord instead of dropped;
+					// now that records are allowed, replay them in order before this tick's records are queued and sent.
+					flushServerPending();
 					break;
 
 				case ServerLinkEvent::TYPE_DATA:
@@ -1497,8 +1506,21 @@ void ConnectionManager::sendServerModeCommand(NetCommandMsg *msg, UnsignedByte r
  */
 void ConnectionManager::queueServerRecord(NetCommandMsg *msg, UnsignedByte relay, UnsignedInt recordSize)
 {
-	// Nothing is sent before START (PROTOCOL.md 4.5 step 9).
+	// Nothing goes on the wire before START (PROTOCOL.md 4.5 step 9). The host, however, finishes loading and runs
+	// its early frames before START, so it produces its LOADCOMPLETE and the early zero-frames while m_serverStarted
+	// is still FALSE. Hold those in order and replay them from flushServerPending() once START arrives, instead of
+	// dropping them, so the relay sees slot 0's frames and does not time the host out. A cap guards a START that
+	// never comes; past it, fall back to the old drop behaviour. Records of invalid size are dropped either way.
 	if (!m_serverStarted) {
+		if ((recordSize < (UnsignedInt)SERVER_MIN_RECORD) || (recordSize > (UnsignedInt)SERVER_MAX_RECORD)
+			|| (m_serverPendingCount >= (UnsignedInt)SERVER_MAX_PENDING_RECORDS)) {
+			return;
+		}
+		NetCommandRef *ref = NEW_NETCOMMANDREF(msg);
+		ref->setRelay(relay);
+		m_serverPending[m_serverPendingCount] = ref;
+		m_serverPendingSize[m_serverPendingCount] = recordSize;
+		++m_serverPendingCount;
 		return;
 	}
 	if ((recordSize < (UnsignedInt)SERVER_MIN_RECORD) || (recordSize > (UnsignedInt)SERVER_MAX_RECORD)) {
@@ -1535,6 +1557,41 @@ void ConnectionManager::flushServerSend()
 		m_serverLink->sendData(m_serverSendBuffer, m_serverSendLength);
 	}
 	m_serverSendLength = 0;
+}
+
+/**
+ * Replay the records held before START through the normal queue path, in the order they were produced,
+ * then empty the hold buffer. Called once from the START handler, with m_serverStarted already TRUE, so
+ * each record takes the ordinary queueServerRecord path and the following flushServerSend() puts them on
+ * the wire. If the records overflow one DATA message, queueServerRecord flushes mid-run, which keeps the
+ * overall order across DATA messages.
+ */
+void ConnectionManager::flushServerPending()
+{
+	for (UnsignedInt i = 0; i < m_serverPendingCount; ++i) {
+		NetCommandRef *ref = m_serverPending[i];
+		if (ref != nullptr) {
+			queueServerRecord(ref->getCommand(), ref->getRelay(), m_serverPendingSize[i]);
+			deleteInstance(ref);
+			m_serverPending[i] = nullptr;
+		}
+	}
+	m_serverPendingCount = 0;
+}
+
+/**
+ * Release any records held before START without sending them. Used when the match resets before START
+ * ever arrives, so the held commands do not leak.
+ */
+void ConnectionManager::clearServerPending()
+{
+	for (UnsignedInt i = 0; i < m_serverPendingCount; ++i) {
+		if (m_serverPending[i] != nullptr) {
+			deleteInstance(m_serverPending[i]);
+			m_serverPending[i] = nullptr;
+		}
+	}
+	m_serverPendingCount = 0;
 }
 
 /**
@@ -3173,6 +3230,8 @@ void ConnectionManager::updateLoadProgress( Int progress )
 
 void ConnectionManager::loadProgressComplete()
 {
+#ifdef RTS_SERVERS
+#endif
 	NetLoadCompleteCommandMsg *msg = newInstance(NetLoadCompleteCommandMsg);
 	msg->setPlayerID( m_localSlot );
 	if (DoesCommandRequireACommandID(msg->getNetCommandType()) == TRUE) {
