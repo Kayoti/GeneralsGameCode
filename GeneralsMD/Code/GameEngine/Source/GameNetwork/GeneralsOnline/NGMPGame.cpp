@@ -12,6 +12,10 @@
 #include "Common/GlobalData.h"
 #include "GameClient/View.h"
 #include "../NextGenMP_defines.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ConnectionManager.h"
+#include "GameNetwork/ServerLink.h"
+#endif
 
 NGMPGameSlot::NGMPGameSlot()
 {
@@ -577,6 +581,54 @@ void NGMPGame::launchGame(void)
 		
 	}
 }
+
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 15/11/2026 Launch path for a launch-flag (direct) Servers match. The slots
+// are already filled locally by ServersDirect, so this skips everything that needs the lobby service: the
+// mesh, the map transfer, the lobby notification and the service-config run-ahead tuning. The match is
+// carried only by the relay link, exactly as a server-lobby match will be.
+void NGMPGame::launchServersDirect(ServerLink *serverLink)
+{
+	setGameInProgress(TRUE);
+
+	DEBUG_ASSERTCRASH(TheNetwork == NULL, ("TheNetwork is not NULL at the start of a direct Servers match."));
+	if (TheNetwork != NULL)
+	{
+		delete TheNetwork;
+		TheNetwork = NULL;
+	}
+
+	TheNetwork = NetworkInterface::createNetwork();
+	TheNetwork->init();
+
+	// Server mode and the relay link must be set before initTransport, so no NextGenTransport is built, and
+	// before parseUserList, so no player-to-player connections are made (docs/servers/DECISIONS.md D50).
+	ConnectionManager *conMgr = TheNetwork->GetConnectionManager();
+	conMgr->setServerMode(TRUE);
+	conMgr->attachServerLink(serverLink);
+
+	TheNetwork->initTransport();	// Returns at once in server mode: no transport is created.
+	TheNetwork->parseUserList(this);
+
+	if (TheGameLogic->isInGame())
+	{
+		TheGameLogic->clearGameData();
+	}
+
+	// The map was resolved against the map cache before this call, so getMap() is a valid cache key.
+	TheWritableGlobalData->m_pendingFile = getMap();
+
+	// GAME_LAN gives the multiplayer load screen and makes GameLogic take the player list from TheNGMPGame
+	// (TheLAN is null on this path). The online load screen and score code need the lobby session, which a
+	// flag start does not have.
+	GameMessage *msg = TheMessageStream->appendMessage(GameMessage::MSG_NEW_GAME);
+	msg->appendIntegerArgument(GAME_LAN);
+
+	InitRandom(getSeed());
+	DEBUG_LOG(("NGMPGame::launchServersDirect - map %s, seed %d, local slot %d",
+		getMap().str(), getSeed(), getLocalSlotNum()));
+}
+#endif // RTS_SERVERS
 
 void NGMPGame::reset(void)
 {

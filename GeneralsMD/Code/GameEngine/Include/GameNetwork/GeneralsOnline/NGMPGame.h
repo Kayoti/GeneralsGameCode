@@ -3,6 +3,9 @@
 #include <chrono>
 
 class LobbyEntry;
+#ifdef RTS_SERVERS
+class ServerLink;
+#endif
 
 class NGMPGameSlot : public GameSlot
 {
@@ -172,6 +175,12 @@ public:
 
 	virtual void startGame(Int gameID);														///< Mark our game as started and record the game ID.
 	void launchGame(void);																			///< NAT negotiation has finished - really start
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 15/11/2026 Launches a relay match whose slots were filled from launch
+	// flags, with no lobby. Sets server mode and attaches the relay link before the transport is created, so
+	// no player-to-player connections are made. serverLink is owned by the caller and must outlive the match.
+	void launchServersDirect(ServerLink *serverLink);
+#endif
 	virtual Int getLocalSlotNum(void) const;										///< Get the local slot number, or -1 if we're not present
 
 	inline void setGameName(UnicodeString name) { m_gameName = name; }
