@@ -10,6 +10,7 @@ import (
 	"errors"
 
 	"servers-lobby/internal/accounts"
+	"servers-lobby/internal/lobbies"
 )
 
 // nameRefusalPrefix starts the chat line that tells a player their name change was refused.
@@ -36,6 +37,20 @@ func (hub *Hub) handleMessage(live *connection, data []byte) {
 		hub.handleRoomChat(live, data)
 	case msgPlayerNameChange:
 		hub.handleNameChange(live, data)
+	case msgMarkReady:
+		hub.handleMarkReady(live, data)
+	case msgLobbyChatFromClient:
+		hub.handleLobbyChat(live, data)
+	case msgStartGame:
+		hub.handleStartGame(live)
+	case msgCountdownStarted:
+		hub.handleCountdownStarted(live)
+	case msgRemovePassword:
+		hub.handleRemovePassword(live)
+	case msgChangePassword:
+		hub.handleChangePassword(live, data)
+	case msgConnectivityCheck:
+		hub.handleConnectivityCheck(live)
 	default:
 		hub.logger.Debug("ignored a message", "userId", live.player.userID, "msgId", *envelope.MsgID)
 	}
@@ -67,7 +82,7 @@ func (hub *Hub) handleRoomChat(live *connection, data []byte) {
 		hub.logger.Debug("ignored a room chat with no valid message", "userId", live.player.userID)
 		return
 	}
-	text := cleanText(*request.Message, maxChatCharacters)
+	text := lobbies.CleanText(*request.Message, maxChatCharacters)
 	if text == "" {
 		return
 	}
@@ -119,14 +134,18 @@ func (hub *Hub) handleNameChange(live *connection, data []byte) {
 	}
 }
 
-// applyNewName records a stored name on the player and sends the member list
-// of the player's room.
+// applyNewName records a stored name on the player, sends the member list of
+// the player's room, and tells the members of the player's lobby with 6 and
+// the list watchers with 7 (SERVICE.md section 6.3).
 func (hub *Hub) applyNewName(target *player, name string) {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
 	target.name = name
 	if target.roomID != roomNone {
 		hub.broadcastMemberList(target.roomID, nil)
+	}
+	if lobby := hub.lobbyOf(target); lobby != nil {
+		hub.lobbyChanged(lobby, lobby.IsListed())
 	}
 }
 

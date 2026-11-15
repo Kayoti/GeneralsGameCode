@@ -195,7 +195,7 @@ func TestUnservedPathsAnswer404(t *testing.T) {
 		path   string
 	}{
 		{"unknown endpoint", http.MethodGet, testPrefix + "Nope"},
-		{"endpoint not in this milestone", http.MethodGet, testPrefix + "Lobbies"},
+		{"lobby path with no id", http.MethodGet, testPrefix + "Lobby"},
 		{"wrong method on a fixed call", http.MethodGet, testPrefix + "VersionCheck"},
 		{"wrong method on PlayerStats batch", http.MethodGet, testPrefix + "PlayerStats/Batch"},
 		{"unknown environment", http.MethodPost, "/env/staging/contract/1/VersionCheck"},
