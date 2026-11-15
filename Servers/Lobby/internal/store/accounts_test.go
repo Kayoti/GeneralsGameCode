@@ -129,3 +129,41 @@ func TestAccountSurvivesRestart(t *testing.T) {
 		t.Errorf("user id after restart = %d, want %d", nextID, userID+1)
 	}
 }
+
+func TestRenameAccountChangesTheName(t *testing.T) {
+	store := openTestStore(t, filepath.Join(t.TempDir(), "lobby.db"))
+	defer store.Close()
+	userID, err := store.CreateAccount("hash-a", playerName)
+	if err != nil {
+		t.Fatalf("CreateAccount returned error: %v", err)
+	}
+
+	renamed, err := store.RenameAccount(userID, "Brave Fox")
+	if err != nil || !renamed {
+		t.Fatalf("RenameAccount = %v, %v; want true, no error", renamed, err)
+	}
+	if name, _, _ := store.DisplayName(userID); name != "Brave Fox" {
+		t.Errorf("name = %q, want Brave Fox", name)
+	}
+}
+
+func TestRenameAccountRefusesANameOfAnotherAccountWithoutRegardToCase(t *testing.T) {
+	store := openTestStore(t, filepath.Join(t.TempDir(), "lobby.db"))
+	defer store.Close()
+	first, _ := store.CreateAccount("hash-a", playerName)
+	second, _ := store.CreateAccount("hash-b", playerName)
+	if _, err := store.RenameAccount(first, "Brave Fox"); err != nil {
+		t.Fatalf("first RenameAccount returned error: %v", err)
+	}
+
+	renamed, err := store.RenameAccount(second, "BRAVE FOX")
+	if err != nil || renamed {
+		t.Fatalf("RenameAccount = %v, %v; want false, no error", renamed, err)
+	}
+	if name, _, _ := store.DisplayName(second); name != "Player1001" {
+		t.Errorf("name = %q, want it unchanged", name)
+	}
+	if again, err := store.RenameAccount(first, "brave fox"); err != nil || !again {
+		t.Errorf("an account changing only the case of its own name = %v, %v; want true", again, err)
+	}
+}

@@ -42,6 +42,10 @@ type Service struct {
 	accountsPerAddressPerHour int
 	now                       func() time.Time
 
+	// nameMu serializes display name changes, because the uniqueness check
+	// and the update are separate statements.
+	nameMu sync.Mutex
+
 	mu         sync.Mutex
 	loginCodes map[string]loginCode
 	sessions   map[string]session

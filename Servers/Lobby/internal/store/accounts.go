@@ -94,3 +94,36 @@ func (store *Store) DeleteRefreshToken(userID int64) error {
 	}
 	return nil
 }
+
+// RenameAccount sets the display name of an account. It returns false and
+// changes nothing when another account already has the name, compared without
+// regard to case. The caller must not run two renames at once, because the
+// check and the update are separate statements.
+func (store *Store) RenameAccount(userID int64, name string) (bool, error) {
+	tx, err := store.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("begin rename of account %d: %w", userID, err)
+	}
+	defer tx.Rollback()
+
+	var taken bool
+	if err := tx.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM accounts WHERE lower(display_name) = lower(?) AND user_id <> ?)`,
+		name, userID,
+	).Scan(&taken); err != nil {
+		return false, fmt.Errorf("check name %q: %w", name, err)
+	}
+	if taken {
+		return false, nil
+	}
+	if _, err := tx.Exec(
+		`UPDATE accounts SET display_name = ? WHERE user_id = ?`,
+		name, userID,
+	); err != nil {
+		return false, fmt.Errorf("rename account %d: %w", userID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit rename of account %d: %w", userID, err)
+	}
+	return true, nil
+}
