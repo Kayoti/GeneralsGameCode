@@ -1,6 +1,6 @@
 # Testing
 
-> The build sections below match this base (Generals Online client). The launch-flag sections were written for the earlier base and are restored by package C3; the flags do not exist in the client until then. The flag names and their meaning stay the same.
+> The build sections below match this base (Generals Online client). The launch-flag sections are restored by package C3 against this base; the flag names and their meaning are the same as on the earlier base.
 
 ## A Servers match without the lobby
 
@@ -34,6 +34,16 @@ cmake --build build/win32-vcpkg-servers --config Debug --target z_generals
 - With `RTS_BUILD_OPTION_SERVERS` off the Servers code and the flags below do not exist.
 - The Debug configuration of the Servers preset is the one used by the phase checks that need the game.
 - Build folders are under `build/` and are ignored by git.
+
+## Where the built executable is
+
+The `z_generals` target builds `GeneralsOnlineZH.exe`. It lands next to the other game binaries under the build folder, in a per-configuration subfolder:
+
+- Servers switch on, Debug (the one the one-PC phase checks use): `build/win32-vcpkg-servers/GeneralsMD/Debug/GeneralsOnlineZH.exe`
+- Servers switch on, Release: `build/win32-vcpkg-servers/GeneralsMD/Release/GeneralsOnlineZH.exe`
+- Servers switch off, Release: `build/win32-vcpkg/GeneralsMD/Release/GeneralsOnlineZH.exe`
+
+Run it from the game data folder (the folder that holds the game's `.big` files and its map cache), for example by copying the executable there, so it finds the data and the map cache. The `-serversMap` note below explains the map cache requirement.
 
 ## Where the client connects
 
@@ -137,11 +147,11 @@ Use the existing flags to put the instances side by side:
 
 ## Running a two player match (restored by package C3)
 
-1. Start the relay (see the relay's own notes) so that it listens on a known address and port. The examples use `127.0.0.1` and `7777`.
-2. Start the host from the game folder:
+1. Start the relay (see the relay's own notes) so that it listens on a known address and port. The examples use `127.0.0.1` and `7777`. On one PC every instance connects from `127.0.0.1`, so run the relay with `--no-address-check`, and raise the entry check, `CREATE` and `JOIN` per-address rate limits so the shared address is not refused (PROTOCOL.md 6; see the note under "Running a two player match" below).
+2. Start the host from the game folder (the built executable is named `GeneralsOnlineZH.exe`; see "Where the built executable is"):
 
 ```
-generalszh.exe -win -xres 800 -yres 600 -quickstart -serversHost -serversRelay 127.0.0.1 -serversPort 7777 -serversSlot 0 -serversPlayers 2 -serversMap "Tournament Desert"
+GeneralsOnlineZH.exe -win -xres 800 -yres 600 -quickstart -serversHost -serversRelay 127.0.0.1 -serversPort 7777 -serversSlot 0 -serversPlayers 2 -serversMap "Tournament Desert"
 ```
 
 3. The host runs the entry check, sends `CREATE`, and on `CREATED` writes the session id and each other slot's join token. They are in the debug log (`Servers direct: slot 1 joins with ...`) and, in any build, in `ServersDirectMatch.txt` in the working directory. One line per joiner, for example:
@@ -153,7 +163,7 @@ generalszh.exe -win -xres 800 -yres 600 -quickstart -serversHost -serversRelay 1
 4. Start each joiner with that line and the common flags:
 
 ```
-generalszh.exe -win -xres 800 -yres 600 -quickstart -serversRelay 127.0.0.1 -serversPort 7777 -serversPlayers 2 -serversMap "Tournament Desert" -serversJoin -serversSlot 1 -serversSession 00000000000000a1 -serversToken 0123456789abcdef
+GeneralsOnlineZH.exe -win -xres 800 -yres 600 -quickstart -serversRelay 127.0.0.1 -serversPort 7777 -serversPlayers 2 -serversMap "Tournament Desert" -serversJoin -serversSlot 1 -serversSession 00000000000000a1 -serversToken 0123456789abcdef
 ```
 
 5. Each instance runs the entry check and sends `JOIN`, then waits for `START`. On `START` every instance loads the map with the fixed seed and factions and the match begins.
@@ -161,6 +171,8 @@ generalszh.exe -win -xres 800 -yres 600 -quickstart -serversRelay 127.0.0.1 -ser
 The host launches as soon as the relay has answered `CREATE`. The relay waits 30 seconds after `CREATED` for the joiners (PROTOCOL.md 4.5), so start them promptly. A joiner that is late is dropped as `NEVER_JOINED`.
 
 A join token works once. To run again, start a new host and use its new tokens.
+
+**Relay configuration for one PC.** Every instance connects from `127.0.0.1`, so one address carries the whole match. Run the test relay with `--no-address-check` (otherwise the pass address check refuses the second instance), and raise the per-address rate limits so that one address is allowed to run the entry check, `CREATE` and `JOIN` for every instance and every restart: the limits are 6 entry checks per minute, 6 `CREATE` per minute and 12 `JOIN` per minute (PROTOCOL.md 6). On the current relay these three limits are compile-time constants (`ENTRY_CHECKS_PER_WINDOW`, `CREATE_PER_ADDRESS_PER_MINUTE`, `JOIN_PER_ADDRESS_PER_MINUTE`); raise them there and rebuild the relay if repeated runs hit `REFUSE` rate-limited.
 
 ## What is logged (restored by package C3)
 
