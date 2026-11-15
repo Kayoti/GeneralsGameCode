@@ -3,6 +3,8 @@
 
 package realtime
 
+import "encoding/json"
+
 // Message ids of CLIENT_REALTIME.md section 1.7. The two notices are exported
 // because the lobby code sends them through Hub.Notify.
 const (
@@ -18,10 +20,15 @@ const (
 	msgStartGame           = 13
 	msgPing                = 14
 	msgPong                = 15
+	msgStartSignalling     = 17
+	msgDisconnectPlayer    = 18
+	msgRequestSignalling   = 19
 	msgCountdownStarted    = 23
 	msgRemovePassword      = 24
 	msgChangePassword      = 25
 	msgConnectivityCheck   = 26
+	msgMeshCheckResponse   = 27
+	msgMeshCheckComplete   = 28
 
 	// MsgLobbyCurrentLobbyUpdate tells a lobby member to fetch the lobby again.
 	MsgLobbyCurrentLobbyUpdate = 6
@@ -35,10 +42,14 @@ const roomNone = -1
 // maxChatCharacters is the longest room chat text; more is cut off (SERVICE.md section 6.3).
 const maxChatCharacters = 300
 
-// inboundEnvelope reads the msg_id every message carries. A message without
-// an integer msg_id is ignored.
+// inboundEnvelope reads the msg_id every message carries, and the two keys of
+// the messages that name another player (12 and 19). A message without an
+// integer msg_id is ignored. The payload of message 12 stays as the bytes the
+// client sent, so one read of the message is enough to forward it.
 type inboundEnvelope struct {
-	MsgID *int `json:"msg_id"`
+	MsgID        *int            `json:"msg_id"`
+	TargetUserID *int64          `json:"target_user_id"`
+	Payload      json.RawMessage `json:"payload"`
 }
 
 // roomChangeRequest is message 3. Room is a pointer so that a missing key is
@@ -125,4 +136,58 @@ type changePasswordRequest struct {
 type startGameMessage struct {
 	MsgID         int    `json:"msg_id"`
 	ScreenshotURL string `json:"screenshot_url"`
+}
+
+// startSignallingMessage is message 17: the receiver starts a connection to
+// UserID. PreferredPort is always 0 and MiddlewareID empty (SERVICE.md section 8.2).
+type startSignallingMessage struct {
+	MsgID         int    `json:"msg_id"`
+	LobbyID       int64  `json:"lobby_id"`
+	UserID        int64  `json:"user_id"`
+	PreferredPort int    `json:"preferred_port"`
+	MiddlewareID  string `json:"middleware_id"`
+}
+
+// disconnectPlayerMessage is message 18: the receiver closes its connection to UserID.
+type disconnectPlayerMessage struct {
+	MsgID   int   `json:"msg_id"`
+	LobbyID int64 `json:"lobby_id"`
+	UserID  int64 `json:"user_id"`
+}
+
+// meshCheckRequest is message 27 from the service to a member.
+type meshCheckRequest struct {
+	MsgID       int   `json:"msg_id"`
+	MeshCheckID int64 `json:"mesh_check_id"`
+	Attempt     int   `json:"attempt"`
+}
+
+// meshCheckReply is message 27 from a member. The id and attempt are
+// pointers so that a missing key is told from 0.
+type meshCheckReply struct {
+	MeshCheckID     *int64  `json:"mesh_check_id"`
+	Attempt         *int    `json:"attempt"`
+	ConnectivityMap []int64 `json:"connectivity_map"`
+	ConnectingMap   []int64 `json:"connecting_map"`
+}
+
+// meshPassedMessage is message 28 when the check passed.
+type meshPassedMessage struct {
+	MsgID        int  `json:"msg_id"`
+	MeshComplete bool `json:"mesh_complete"`
+}
+
+// missingConnection is one pair of message 28: Source does not list Target as connected.
+type missingConnection struct {
+	SourceUserID int64 `json:"source_user_id"`
+	TargetUserID int64 `json:"target_user_id"`
+}
+
+// meshFailedMessage is message 28 when the check did not pass. The list is
+// never nil, so it is written as an array also when empty.
+type meshFailedMessage struct {
+	MsgID              int                 `json:"msg_id"`
+	MeshComplete       bool                `json:"mesh_complete"`
+	Reason             string              `json:"reason"`
+	MissingConnections []missingConnection `json:"missing_connections"`
 }

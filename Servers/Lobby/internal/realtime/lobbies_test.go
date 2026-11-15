@@ -144,8 +144,8 @@ func TestCreateTellsTheWatchersAndJoinTellsMembersAndWatchers(t *testing.T) {
 	requireIDs(t, watcher.socket, MsgLobbyListUpdate)
 
 	mustJoin(t, service, guest, lobbyID)
-	requireIDs(t, host.socket, MsgLobbyCurrentLobbyUpdate)
-	requireIDs(t, guest.socket, MsgLobbyCurrentLobbyUpdate)
+	requireIDs(t, host.socket, MsgLobbyCurrentLobbyUpdate, msgStartSignalling)
+	requireIDs(t, guest.socket, MsgLobbyCurrentLobbyUpdate, msgStartSignalling)
 	requireIDs(t, watcher.socket, MsgLobbyListUpdate)
 }
 
@@ -467,7 +467,7 @@ func TestExpiredHoldRemovesThePlayerFromItsLobby(t *testing.T) {
 	waitFor(t, "the held place to run out", func() bool {
 		return memberOf(t, service, host, lobbyID, 1).UserID == lobbies.NoUser
 	})
-	requireIDs(t, host.socket, MsgLobbyCurrentLobbyUpdate, msgRoomMemberList)
+	requireIDs(t, host.socket, MsgLobbyCurrentLobbyUpdate, msgDisconnectPlayer, msgRoomMemberList)
 }
 
 // waitFor polls until condition is true or testWait passes.
@@ -520,8 +520,8 @@ func TestHostLeavingPassesTheLobbyToTheEarliestJoiner(t *testing.T) {
 	if detail.Owner != second.id || !detail.Members[1].IsReady || detail.Members[0].SlotState != lobbies.SlotOpen {
 		t.Errorf("owner %d, slot 1 %+v, slot 0 %+v; want the second player as ready owner and slot 0 open", detail.Owner, detail.Members[1], detail.Members[0])
 	}
-	requireIDs(t, second.socket, MsgLobbyCurrentLobbyUpdate)
-	requireIDs(t, third.socket, MsgLobbyCurrentLobbyUpdate)
+	requireIDs(t, second.socket, MsgLobbyCurrentLobbyUpdate, msgDisconnectPlayer)
+	requireIDs(t, third.socket, MsgLobbyCurrentLobbyUpdate, msgDisconnectPlayer)
 	requireIDs(t, host.socket, MsgLobbyListUpdate)
 	requireIDs(t, watcher.socket, MsgLobbyListUpdate)
 	if _, found := service.hub.LobbyDetail(host.id, lobbyID); found {
@@ -559,7 +559,7 @@ func TestKickRemovesTheMemberAndTellsItsClient(t *testing.T) {
 
 	service.hub.ChangeLobby(host.id, lobbyID, lobbies.FieldRequest{Field: &field, UserID: &target})
 
-	requireIDs(t, host.socket, MsgLobbyCurrentLobbyUpdate)
+	requireIDs(t, host.socket, MsgLobbyCurrentLobbyUpdate, msgDisconnectPlayer)
 	requireIDs(t, guest.socket, MsgLobbyCurrentLobbyUpdate, MsgLobbyListUpdate)
 	if _, found := service.hub.LobbyDetail(guest.id, lobbyID); found {
 		t.Error("the kicked player still sees the lobby")

@@ -88,23 +88,25 @@ func (live *connection) readLoop() bool {
 		if err != nil {
 			return websocket.CloseStatus(err) != -1
 		}
-		if !live.withinRate(&limiter, data) {
+		var envelope inboundEnvelope
+		if err := json.Unmarshal(data, &envelope); err != nil || envelope.MsgID == nil {
+			live.hub.logger.Debug("ignored a message with no msg_id", "userId", live.player.userID, "bytes", len(data))
+			continue
+		}
+		if !live.withinRate(&limiter, *envelope.MsgID) {
 			live.hub.logger.Info("client sent too many messages", "userId", live.player.userID)
 			live.closeWithFrame(websocket.StatusPolicyViolation, closeReasonFlood)
 			return false
 		}
-		live.hub.handleMessage(live, data)
+		live.hub.handleMessage(live, envelope, data)
 	}
 }
 
 // withinRate counts a message against the connection's limit and reports
 // whether the client is still within it. Messages 12 and 14 are not counted.
-func (live *connection) withinRate(limiter *rateLimiter, data []byte) bool {
-	var envelope inboundEnvelope
-	if err := json.Unmarshal(data, &envelope); err == nil && envelope.MsgID != nil {
-		if *envelope.MsgID == msgSignal || *envelope.MsgID == msgPing {
-			return true
-		}
+func (live *connection) withinRate(limiter *rateLimiter, msgID int) bool {
+	if msgID == msgSignal || msgID == msgPing {
+		return true
 	}
 	return limiter.allow(time.Now())
 }

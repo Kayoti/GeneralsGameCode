@@ -61,7 +61,7 @@ func run(args []string) error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	accountService := accounts.New(db, cfg.AccountsPerAddressPerHour)
 	hub := realtime.NewHub(realtime.DefaultSettings(cfg.Rooms), accountService, logger)
-	options := api.Options{TrustForwardedFor: cfg.TrustForwardedFor, WSURI: cfg.PublicWSURL, MOTD: cfg.MOTD}
+	options := api.Options{TrustForwardedFor: cfg.TrustForwardedFor, WSURI: cfg.PublicWSURL, MOTD: cfg.MOTD, TurnSecret: cfg.TurnSecret}
 	server := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           api.NewHandler(options, accountService, hub, logger),

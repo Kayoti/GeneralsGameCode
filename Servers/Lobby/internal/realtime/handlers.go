@@ -19,15 +19,11 @@ const nameRefusalPrefix = "Name not changed: "
 // nameSaveFailure is the reason given when the name could not be stored.
 const nameSaveFailure = "the service could not save it, try again later"
 
-// handleMessage reads one message from a client and does what its msg_id asks.
-// A message that is not a JSON object with an integer msg_id, and a msg_id
-// the service does not handle, are ignored and logged at debug level.
-func (hub *Hub) handleMessage(live *connection, data []byte) {
-	var envelope inboundEnvelope
-	if err := json.Unmarshal(data, &envelope); err != nil || envelope.MsgID == nil {
-		hub.logger.Debug("ignored a message with no msg_id", "userId", live.player.userID, "bytes", len(data))
-		return
-	}
+// handleMessage does what the msg_id of a message from a client asks. The
+// envelope is the message as the read loop already parsed it, with an integer
+// msg_id; data is the whole message. A msg_id the service does not handle is
+// ignored and logged at debug level.
+func (hub *Hub) handleMessage(live *connection, envelope inboundEnvelope, data []byte) {
 	switch *envelope.MsgID {
 	case msgPing:
 		hub.answerPing(live)
@@ -51,6 +47,12 @@ func (hub *Hub) handleMessage(live *connection, data []byte) {
 		hub.handleChangePassword(live, data)
 	case msgConnectivityCheck:
 		hub.handleConnectivityCheck(live)
+	case msgSignal:
+		hub.handleSignal(live, envelope)
+	case msgRequestSignalling:
+		hub.handleRequestSignalling(live, envelope)
+	case msgMeshCheckResponse:
+		hub.handleMeshCheckReply(live, data)
 	default:
 		hub.logger.Debug("ignored a message", "userId", live.player.userID, "msgId", *envelope.MsgID)
 	}

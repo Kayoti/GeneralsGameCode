@@ -54,6 +54,9 @@ type Options struct {
 	WSURI string
 	// MOTD is the text of GET MOTD.
 	MOTD string
+	// TurnSecret is the key of the TURN credentials (SERVICE.md section 8.1).
+	// It is never logged. Empty means the answers carry empty credentials.
+	TurnSecret string
 }
 
 // server answers the contract calls. It holds what the calls need.
@@ -63,6 +66,7 @@ type server struct {
 	trustForwardedFor bool
 	wsURI             string
 	motd              string
+	turnSecret        string
 	logger            *slog.Logger
 }
 
@@ -75,6 +79,7 @@ func NewHandler(options Options, accountService *accounts.Service, hub *realtime
 		trustForwardedFor: options.TrustForwardedFor,
 		wsURI:             options.WSURI,
 		motd:              options.MOTD,
+		turnSecret:        options.TurnSecret,
 		logger:            logger,
 	}
 	return withRequestLog(options.TrustForwardedFor, logger, withBodyLimit(http.HandlerFunc(routes.serve)))
