@@ -48,7 +48,7 @@ After 0.2, tracks L, B and C can start together.
 | [L5](packages/L5-service-p2p.md) | Lobby service: player-to-player connection support | L4 | todo |
 | [L6](packages/L6-service-server-lobbies.md) | Lobby service: server lobbies | L5 | todo |
 | [B1](packages/B1-own-service.md) | Client talks only to our own service | 0.2 | todo |
-| [C1](packages/C1-client-link.md) | Client: relay link, entry check and region file, carried over | 0.2 | todo |
+| [C1](packages/C1-client-link.md) | Client: relay link, entry check and region file, carried over | 0.2 | done |
 | [C2](packages/C2-client-records.md) | Client: match commands through the relay | C1 | todo |
 | [C3](packages/C3-client-flags.md) | Client: start a relay match from launch flags | C2, B1, D1 | todo |
 | [D1](packages/D1-servers-button.md) | Menus: Servers button and entry check on entry | B1, C1 | todo |
@@ -97,4 +97,5 @@ The checks that need the game use the Debug configuration of the `win32-vcpkg-se
 | 2026-11-14 | The project runs its own lobby service (decisions D35 to D50). The client's side of the service contract was read from the client code and recorded under `reference/`. `SERVICE.md` written. `PROTOCOL.md` section 5 rewritten for the own service; the relay link (section 4) is unchanged. |
 | 2026-11-14 | The earlier packages and status moved to `archive/`. New packages written for phases 0 to 2. The relay and the client's relay pieces are carried over from the `servers` branch by packages 0.2, C1, C2 and C3. |
 | 2026-11-15 | L1 done: the lobby service skeleton, configuration reader, SQLite store and the fixed answers of SERVICE 5.2 plus VersionCheck and the health check. Go sources are pinned to LF on checkout. |
+| 2026-11-15 | C1 done: the relay link, entry check and region file reader carried over from `servers` and built as `core_serverlink` behind the Servers switch. Nothing calls it yet (C2 and D1 do). |
 | 2026-11-15 | Package 0.2 merged. The Generals Online client builds with the `win32-vcpkg` preset. The `RTS_BUILD_OPTION_SERVERS` switch and the `win32-vcpkg-servers` preset are added. The relay and the client region files are carried over from the earlier work; the relay builds and `relay_tests` pass. |

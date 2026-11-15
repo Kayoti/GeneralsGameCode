@@ -40,7 +40,7 @@ Bring the three finished, engine-independent client pieces over from the `server
 - [x] The client builds with the switch on and with it off. V1 is re-confirmed on this base, or the exact clash is recorded and the package stops as `partial`.
 - [x] No source change was needed to the six files. If one was, it is a separate commit and explained in the handoff notes.
 - [x] The checks for this program in STANDARDS.md, "Before a package is done", pass.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -65,3 +65,8 @@ Bring the three finished, engine-independent client pieces over from the `server
   - The rest of the archive notes still apply to C2 and D1: the pass is 100 bytes; PROTOCOL.md gives no deadline for CREATE and JOIN, so `timeoutMs` is a parameter; keep one ENet user initialised at a time; call `ServerEntryCheck::update` every frame.
   - `regions.txt` has no defined place next to the installed game yet.
 - Review findings and fixes:
+  - Verified: the seven carried files are byte-identical to `servers` (`git diff servers servers-go-C1 -- <path>` empty for each); the switch-on build fetches ENet at the v1.3.18 pin and builds `core_serverlink`, the switch-off build has no ENet in `_deps` and no serverlink/enet entry in the generated build graph; the relay-protocol message layouts, field offsets, codes, limits and the region-file format match PROTOCOL.md 4 and 7.1; every fixed message is parsed only after an exact size check, slot and leader-slot indices are bounds-checked, the record stream is validated with no read past the buffer. Scope, comment format, author and commit hygiene all correct; no Generals Online host, key or address present.
+  - Two low-severity notes, neither blocking, both in files carried unchanged from `servers` and not yet called:
+    1. `RTS_SERVERS` is defined both on `core_config` (interface) and on `core_serverlink` (public). Harmless — CMake de-duplicates the same empty define, and `core_serverlink` needs its own because it does not link `core_config`. Matches `servers`; no change.
+    2. ENet/Winsock start-up in `ServerRegions.cpp` is not reference-counted across a `ServerLink` and a `ServerEntryCheck` living at once. The handoff records that the caller must keep one ENet user active at a time; this is a concern for the C2/D1 callers, not C1, where nothing calls it.
+  - Post-merge: the merge into `servers-go` changed only the lobby-service and docs files that L1 brought in; no file the client compiles differs from the reviewed-and-built C1 tip, so the builder's switch-on/off build evidence carries to the merge.
