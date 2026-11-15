@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"servers-lobby/internal/lobbies"
 	"servers-lobby/internal/realtime"
@@ -40,8 +41,7 @@ const serverSessionRefused = 0
 // listLatencyMs is the one latency given per lobby in GET Lobbies (SERVICE.md section 5.1).
 const listLatencyMs = 0
 
-// createLobbyAnswer is the answer of PUT Lobbies (CLIENT_HTTP.md 4.13). The
-// TURN values are empty strings until player-to-player support is added.
+// createLobbyAnswer is the answer of PUT Lobbies (CLIENT_HTTP.md 4.13).
 type createLobbyAnswer struct {
 	Result       int    `json:"result"`
 	LobbyID      int64  `json:"lobby_id"`
@@ -196,7 +196,10 @@ func (routes *server) createLobbyCall(w http.ResponseWriter, r *http.Request, us
 		writeAnswer(w, http.StatusOK, failed)
 		return
 	}
-	writeAnswer(w, http.StatusOK, createLobbyAnswer{Result: createResultSucceeded, LobbyID: lobbyID})
+	username, token := turnCredentials(routes.turnSecret, userID, time.Now())
+	writeAnswer(w, http.StatusOK, createLobbyAnswer{
+		Result: createResultSucceeded, LobbyID: lobbyID, TurnUsername: username, TurnToken: token,
+	})
 }
 
 // lobbyDetailCall answers GET Lobby/{id}; only members see a lobby.
@@ -231,7 +234,8 @@ func (routes *server) joinLobbyCall(w http.ResponseWriter, r *http.Request, user
 	}
 	err := routes.hub.JoinLobby(userID, lobbyID, request)
 	if err == nil {
-		writeAnswer(w, http.StatusOK, joinLobbyAnswer{Success: true})
+		username, token := turnCredentials(routes.turnSecret, userID, time.Now())
+		writeAnswer(w, http.StatusOK, joinLobbyAnswer{Success: true, TurnUsername: username, TurnToken: token})
 		return
 	}
 	for _, failure := range joinStatuses {
