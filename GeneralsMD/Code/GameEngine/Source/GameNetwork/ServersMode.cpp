@@ -31,6 +31,8 @@
 #include "GameClient/GameText.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/MessageBox.h"
+#include "GameNetwork/GameSpy/PeerDefs.h"
+#include "GameNetwork/GameSpyOverlay.h"
 #include "GameNetwork/ServersMode.h"
 
 // The region file is read from the working directory of the game.
@@ -115,6 +117,20 @@ UnicodeString ServersModeRefusalText( UnsignedByte code, UnsignedShort rttMs, Un
 			// Includes SERVER_REFUSE_NO_ANSWER, which is not a relay code
 			return TheGameText->FETCH_OR_SUBSTITUTE( "GUI:ServersCannotConnect", L"The server cannot be reached." );
 	}
+}
+
+// Lobby calls ------------------------------------------------------------------------------------
+
+UnicodeString ServersCheckExpiredText()
+{
+	return TheGameText->FETCH_OR_SUBSTITUTE( "GUI:ServersCheckExpired",
+		L"Your server check has expired. Return to the main menu and enter Servers again." );
+}
+
+void ServersShowCheckExpired()
+{
+	SetLobbyAttemptHostJoin( FALSE );
+	GSMessageBoxOk( TheGameText->FETCH_OR_SUBSTITUTE( "GUI:ServersTitle", L"Servers" ), ServersCheckExpiredText() );
 }
 
 // Entry check ------------------------------------------------------------------------------------

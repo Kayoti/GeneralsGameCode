@@ -4,10 +4,29 @@
 #include "GameNetwork/GeneralsOnline/OnlineServices_Init.h"
 #include "GameClient/MapUtil.h"
 #include "GameLogic/GameLogic.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServersMode.h"
+#endif
 
 extern void OnKickedFromLobby();
 
 extern NGMPGame* TheNGMPGame;
+
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 15/11/2026 Servers mode sends its pass in a header on create and join (PROTOCOL.md 5.2, SERVICE.md section 10).
+static const char* const SERVERS_PASS_HEADER = "X-Servers-Pass";
+static const int SERVERS_STATUS_PASS_REFUSED = 403;
+
+// The pass is never logged. A missing pass sends no header, and the service refuses the call.
+static void AddServersPassHeader(std::map<std::string, std::string>& mapHeaders)
+{
+	const AsciiString passHex = ServersModeGetPassHex();
+	if (passHex.isNotEmpty())
+	{
+		mapHeaders[SERVERS_PASS_HEADER] = passHex.str();
+	}
+}
+#endif
 
 struct JoinLobbyResponse
 {
@@ -1160,6 +1179,14 @@ void NGMP_OnlineServices_LobbyInterface::JoinLobby(LobbyEntry lobbyInfo, std::st
 			std::string strURI = std::format("{}/{}", NGMP_OnlineServicesManager::GetAPIEndpoint("Lobby"), lobbyInfo.lobbyID);
 			std::map<std::string, std::string> mapHeaders;
 
+#ifdef RTS_SERVERS
+			// TheSuperHackers @feature Kayoti 15/11/2026 Sends the pass when joining in Servers mode.
+			if (ServersModeIsOn())
+			{
+				AddServersPassHeader(mapHeaders);
+			}
+#endif
+
 			NetworkLog(ELogVerbosity::LOG_RELEASE, "[NGMP] Joining lobby with id %d", lobbyInfo.lobbyID);
 
 			bool bHasMap = TheMapCache->findMap(AsciiString(lobbyInfo.map_path.c_str()));
@@ -1238,6 +1265,13 @@ void NGMP_OnlineServices_LobbyInterface::JoinLobby(LobbyEntry lobbyInfo, std::st
                     {
                         JoinResult = EJoinLobbyResult::JoinLobbyResult_AnticheatMismatch;
                     }
+#ifdef RTS_SERVERS
+					// TheSuperHackers @feature Kayoti 15/11/2026 A 403 on a Servers join means the pass is not valid.
+					else if (ServersModeIsOn() && statusCode == SERVERS_STATUS_PASS_REFUSED)
+					{
+						JoinResult = EJoinLobbyResult::JoinLobbyResult_ServersPassRefused;
+					}
+#endif
 					// TODO_NGMP: Handle room full error (JoinLobbyResult_FullRoom, can we even get that?
 
 					// no response body from this, just http codes
@@ -1528,6 +1562,15 @@ void NGMP_OnlineServices_LobbyInterface::CreateLobby(UnicodeString strLobbyName,
 			j["max_cam_height"] = NGMP_OnlineServicesManager::Settings.Camera_GetMaxHeight_WhenLobbyHost();
 			j["anticheat_id"] = AnticheatPlugInterface::GetAnticheatIdentifier();
 
+#ifdef RTS_SERVERS
+			// TheSuperHackers @feature Kayoti 15/11/2026 Creates a server lobby in Servers mode: the body says so and the pass travels in a header.
+			if (ServersModeIsOn())
+			{
+				j["server_mode"] = true;
+				AddServersPassHeader(mapHeaders);
+			}
+#endif
+
 			std::string strPostData = j.dump();
 
 			NGMP_OnlineServicesManager::GetInstance()->GetHTTPManager()->SendPUTRequest(strURI.c_str(), EIPProtocolVersion::DONT_CARE, mapHeaders, strPostData.c_str(), [=](bool bSuccess, int statusCode, std::string strBody, HTTPRequest* pReq)
@@ -1542,6 +1585,19 @@ void NGMP_OnlineServices_LobbyInterface::CreateLobby(UnicodeString strLobbyName,
 							NetworkLog(ELogVerbosity::LOG_RELEASE, "[NGMP] CreateLobby callback: required interface is null, aborting");
 							return;
 						}
+
+#ifdef RTS_SERVERS
+						// TheSuperHackers @feature Kayoti 15/11/2026 A refused or unanswered create in Servers mode shows the expired-check text.
+						if (ServersModeIsOn() && (!bSuccess || statusCode == SERVERS_STATUS_PASS_REFUSED))
+						{
+							if (pLobbyInterface == this && pLobbyInterface->m_LobbyJoinGeneration.load() == lobbyCreateGeneration)
+							{
+								NetworkLog(ELogVerbosity::LOG_RELEASE, "[NGMP] Server lobby create failed, status %d", statusCode);
+								ServersShowCheckExpired();
+							}
+							return;
+						}
+#endif
 
 						nlohmann::json jsonObject = nlohmann::json::parse(strBody);
 						CreateLobbyResponse resp = jsonObject.get<CreateLobbyResponse>();
@@ -1643,6 +1699,15 @@ void NGMP_OnlineServices_LobbyInterface::CreateLobby(UnicodeString strLobbyName,
 						else
 						{
 							NetworkLog(ELogVerbosity::LOG_RELEASE, "[NGMP] Failed to create lobby!\n");
+
+#ifdef RTS_SERVERS
+							// TheSuperHackers @feature Kayoti 15/11/2026 Stays on the lobby list with the expired-check text instead of opening the staging room.
+							if (ServersModeIsOn())
+							{
+								ServersShowCheckExpired();
+								return;
+							}
+#endif
 
 							pLobbyInterface->InvokeCreateLobbyCallback(resp.result == ECreateLobbyResponseResult::SUCCEEDED);
 						}

@@ -78,6 +78,10 @@
 #include <unordered_set>
 #include <utility>
 
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServersMode.h"
+#endif
+
 void refreshGameList( Bool forceRefresh = FALSE );
 void refreshPlayerList( Bool forceRefresh = FALSE );
 
@@ -1225,6 +1229,13 @@ void NGMP_WOLLobbyMenu_JoinLobbyCallback(EJoinLobbyResult result)
         case EJoinLobbyResult::JoinLobbyResult_AnticheatMismatch:
             s = TheGameText->fetchOrSubstitute("GUI:JoinFailedAnticheatMismatch", L"You are running a different anticheat from this lobby host.");
             break;
+
+#ifdef RTS_SERVERS
+		// TheSuperHackers @feature Kayoti 15/11/2026 The service refused the pass of a Servers join; the player stays on the lobby list.
+		case EJoinLobbyResult::JoinLobbyResult_ServersPassRefused:
+			s = ServersCheckExpiredText();
+			break;
+#endif
 
 		// NOTE: Commented out ones are no longer supported. Seems like these we GS concepts but not part of the game
 		/*

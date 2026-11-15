@@ -1,6 +1,6 @@
 # D2 Menus: create and join server lobbies, list filter
 
-State: todo
+State: done
 Branch: servers-go-D2
 
 ## Goal
@@ -34,15 +34,15 @@ D1
 
 ## Done when
 
-- [ ] In Servers mode `CreateLobby` adds `server_mode: true` to the request and sends the pass in the `X-Servers-Pass` header. In Online mode the request is unchanged.
-- [ ] In Servers mode `JoinLobby` sends the pass header.
-- [ ] A `403` answer to a join shows "Your server check has expired. Return to the main menu and enter Servers again." and returns to the lobby list. A failed create in Servers mode shows the same text.
-- [ ] The lobby list filter (PROTOCOL.md 5.3) is applied in the `onComplete` lambda of `RefreshGameListBox`, before sorting, in both modes: Servers shows only `LobbyType` 2 with the player's region tag; Online shows only lobbies whose `LobbyType` is not 2. The existing game-mode filter still works on top.
-- [ ] `LobbyType` 2 is a named constant next to the existing lobby type values.
-- [ ] In Servers mode the create dialog hides the ladder choice.
-- [ ] The pass is never written to a log.
-- [ ] Everything is behind `RTS_SERVERS`. With the switch off, requests and the list are exactly as before, and server lobbies are still hidden from the list. That one rule, hiding `LobbyType` 2, is compiled in every build.
-- [ ] The checks for this program in STANDARDS.md, "Before a package is done", pass.
+- [x] In Servers mode `CreateLobby` adds `server_mode: true` to the request and sends the pass in the `X-Servers-Pass` header. In Online mode the request is unchanged.
+- [x] In Servers mode `JoinLobby` sends the pass header.
+- [x] A `403` answer to a join shows "Your server check has expired. Return to the main menu and enter Servers again." and returns to the lobby list. A failed create in Servers mode shows the same text.
+- [x] The lobby list filter (PROTOCOL.md 5.3) is applied in the `onComplete` lambda of `RefreshGameListBox`, before sorting, in both modes: Servers shows only `LobbyType` 2 with the player's region tag; Online shows only lobbies whose `LobbyType` is not 2. The existing game-mode filter still works on top.
+- [x] `LobbyType` 2 is a named constant next to the existing lobby type values.
+- [x] In Servers mode the create dialog hides the ladder choice.
+- [x] The pass is never written to a log.
+- [x] Everything is behind `RTS_SERVERS`. With the switch off, requests and the list are exactly as before, and server lobbies are still hidden from the list. That one rule, hiding `LobbyType` 2, is compiled in every build.
+- [x] The checks for this program in STANDARDS.md, "Before a package is done", pass.
 - [ ] Reviewed by someone other than the author.
 
 ## Out of scope
@@ -52,7 +52,15 @@ D1
 
 ## Handoff notes
 
-- Finished:
-- Left to do:
+- Finished: All code items. `OnlineServices_LobbyInterface.h/.cpp` (`ELobbyType::Servers = 2`; `JoinLobbyResult_ServersPassRefused`; `server_mode` and `X-Servers-Pass` on create; pass header on join; 403 mapping; create failure in Servers mode shows the text and does not open the staging room). `LobbyUtils.cpp` (`removeLobbiesHiddenInCurrentMode`, applied first in the `onComplete` lambda, so the game-mode filter runs on top). `PopupHostGame.cpp` (ladder combo box hidden in Servers mode). `WOLLobbyMenu.cpp` (join result case only). `ServersMode.h/.cpp` (`ServersCheckExpiredText`, `ServersShowCheckExpired`).
+- Left to do: Live test against a lobby service with L6 (not built yet). Review by someone other than the author.
 - Surprises and open questions:
+  - A constant named `HTTP_STATUS_FORBIDDEN` fails to compile (macro clash, C2059); renamed `SERVERS_STATUS_PASS_REFUSED`.
+  - `NGMP_WOLLobbyMenu_CreateLobbyCallback` ignores its `bSuccess` and opens the staging room even on failure (existing Online behaviour, untouched). In Servers mode a failed create therefore does not call it.
+  - The host dialog layout (`PopupHostGame.wnd`) is not in the repository, so only the ladder combo box is hidden; a label next to it, if any, is not.
+  - Debug builds set `CURLOPT_VERBOSE` in `HTTPRequest.cpp`, which prints all request headers, including `X-Servers-Pass` and `Authorization`, to stderr. No log file gets the pass. Not changed (file is Must not edit).
+  - Servers mode sends the pass on every join, as the package says; PROTOCOL.md 5.2 says other lobbies send none. The Servers list shows only type 2, so both agree in practice.
+  - A create that gets no answer (`bSuccess` false) in Servers mode shows the same expired-check text, as the package asks.
+  - `JoinLobby` still creates a `NetworkMesh` for server lobbies (D50 concern; not in this package).
+  - Region compare is exact (`Region` equals the tag).
 - Review findings and fixes:

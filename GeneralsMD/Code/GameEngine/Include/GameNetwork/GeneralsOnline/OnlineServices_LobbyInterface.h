@@ -42,7 +42,9 @@ enum class ELobbyType
 {
 	UNKNOWN = -1,
 	CustomGame = 0,
-	QuickMatch = 1
+	QuickMatch = 1,
+	// TheSuperHackers @feature Kayoti 15/11/2026 Names the lobby type of a server lobby (PROTOCOL.md 5.2).
+	Servers = 2
 };
 
 struct LobbyEntry
@@ -87,7 +89,11 @@ enum class EJoinLobbyResult
 	JoinLobbyResult_FullRoom,       // The room is full.
 	JoinLobbyResult_BadPassword,    // An incorrect password (or none) was given for a passworded room.
 	JoinLobbyResult_JoinFailed, // Generic failure.
-	JoinLobbyResult_AnticheatMismatch // Anticheat mismatch
+	JoinLobbyResult_AnticheatMismatch, // Anticheat mismatch
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 15/11/2026 The service refused a server lobby join because the pass is not valid.
+	JoinLobbyResult_ServersPassRefused
+#endif
 };
 
 enum class ELobbyJoinability

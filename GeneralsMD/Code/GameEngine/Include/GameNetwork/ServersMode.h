@@ -49,6 +49,14 @@ AsciiString ServersModeGetPassHex();
 /// The text shown to the player for a refused entry check. code is a ServerRefuseCode.
 UnicodeString ServersModeRefusalText( UnsignedByte code, UnsignedShort rttMs, UnsignedShort limitMs );
 
+// Lobby calls ------------------------------------------------------------------------------------
+
+/// The text shown when the service refuses a server lobby call because the pass is not valid (PROTOCOL.md 5.2).
+UnicodeString ServersCheckExpiredText();
+
+/// Shows ServersCheckExpiredText() in a message box and ends the pending host or join attempt, so the player is back on the lobby list.
+void ServersShowCheckExpired();
+
 // Entry check ------------------------------------------------------------------------------------
 
 enum ServersEntryResult
