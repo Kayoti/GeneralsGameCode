@@ -1422,7 +1422,7 @@ void ConnectionManager::updateServerMode(Bool isInGame)
 				case ServerLinkEvent::TYPE_LOST:
 					// The relay connection ended. End the match for the local player with a message.
 					if (TheInGameUI != nullptr) {
-						TheInGameUI->messageNoFormat(UnicodeString(L"Lost connection to the server."));
+						TheInGameUI->messageNoFormat(TheGameText->fetchOrSubstitute("GUI:ServersLostConnection", L"Lost connection to the server."));
 					}
 					m_serverLink = nullptr;
 					if (TheGameLogic != nullptr) {
@@ -1438,8 +1438,9 @@ void ConnectionManager::updateServerMode(Bool isInGame)
 		}
 	}
 
-	// The disconnect manager still shows a "waiting" screen if frames stall, but in server mode it
-	// never starts a vote and never removes a player. Removal comes only from a DROP or a leave command.
+	// The disconnect manager still tracks frame stalls, but in server mode it never turns on the
+	// disconnect screen, never starts a vote and never removes a player. Removal comes only from a
+	// DROP or a leave command.
 	if (isInGame) {
 		m_disconnectManager->update(this);
 	}
