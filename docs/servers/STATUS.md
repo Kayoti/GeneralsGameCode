@@ -42,7 +42,7 @@ After 0.2, tracks L, B and C can start together.
 | Package | Title | Depends on | State |
 |---|---|---|---|
 | [L1](packages/L1-service-skeleton.md) | Lobby service: program skeleton, configuration and fixed answers | 0.2 | done |
-| [L2](packages/L2-service-login.md) | Lobby service: accounts, login and tokens | L1 | todo |
+| [L2](packages/L2-service-login.md) | Lobby service: accounts, login and tokens | L1 | done |
 | [L3](packages/L3-service-websocket.md) | Lobby service: WebSocket, rooms, room chat and names | L2 | todo |
 | [L4](packages/L4-service-lobbies.md) | Lobby service: lobbies | L3 | todo |
 | [L5](packages/L5-service-p2p.md) | Lobby service: player-to-player connection support | L4 | todo |
@@ -98,4 +98,5 @@ The checks that need the game use the Debug configuration of the `win32-vcpkg-se
 | 2026-11-14 | The earlier packages and status moved to `archive/`. New packages written for phases 0 to 2. The relay and the client's relay pieces are carried over from the `servers` branch by packages 0.2, C1, C2 and C3. |
 | 2026-11-15 | L1 done: the lobby service skeleton, configuration reader, SQLite store and the fixed answers of SERVICE 5.2 plus VersionCheck and the health check. Go sources are pinned to LF on checkout. |
 | 2026-11-15 | C1 done: the relay link, entry check and region file reader carried over from `servers` and built as `core_serverlink` behind the Servers switch. Nothing calls it yet (C2 and D1 do). |
+| 2026-11-15 | L2 done: accounts, login codes, sessions and refresh tokens (SERVICE 4), the login requirement on the fixed calls, the per-address creation limit, and the `lobbyprobe` tool for the login path. |
 | 2026-11-15 | Package 0.2 merged. The Generals Online client builds with the `win32-vcpkg` preset. The `RTS_BUILD_OPTION_SERVERS` switch and the `win32-vcpkg-servers` preset are added. The relay and the client region files are carried over from the earlier work; the relay builds and `relay_tests` pass. |

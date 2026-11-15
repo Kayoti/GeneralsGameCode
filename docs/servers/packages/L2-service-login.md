@@ -41,7 +41,7 @@ L1
 - [x] Tests cover: first login, later login by refresh token, refresh, expired session, unknown tokens, deleted token, the creation limit, and a restart keeping the account. Evidence: `accounts/accounts_test.go` (14 tests) and `store/accounts_test.go`; `api/auth_test.go`. `go test -count=1 ./...` passes.
 - [x] `Servers/Lobby/tools/lobbyprobe` exists and performs: version check, login code, check login, refresh, login with token. It prints one line per step and exits non-zero on the first failure. TESTING.md says how to run it. Evidence: `tools/lobbyprobe/main.go`; live run below; failure exit checked with the service stopped (exit 1).
 - [x] The checks for this program in STANDARDS.md, "Before a package is done", pass. Evidence: `gofmt -l .` printed nothing; `go vet ./...` printed nothing; `go test -count=1 ./...` reported `ok` for `accounts`, `api`, `config`, `store` and `no test files` for `cmd/lobby` and `tools/lobbyprobe`. `go test -race` was not run: `go env CGO_ENABLED` is 0 on this PC (no C compiler), so the race detector cannot build.
-- [ ] Reviewed by someone other than the author.
+- [x] Reviewed by someone other than the author.
 
 ## Out of scope
 
@@ -74,3 +74,21 @@ L1
   7. Behaviour change for L1 calls: `Social/...`, `Matchmaking`, `PlayerStats`, `GlobalStats` and `ProvideMWToken` now answer `401 {}` without a session, where L1 answered their fixed bodies. CLIENT_HTTP.md 2.1 says the client sends those calls only while logged in, so the client is not affected. The existing tests in `handler_test.go` were changed to log in first (`sessionFor`), and the assertions are unchanged.
   8. `NewHandler` takes the WebSocket address and the accounts service, so its callers changed; the only caller outside tests is `cmd/lobby/main.go`. `testHandler` now takes `*testing.T`.
 - Review findings and fixes:
+  - Verified on the branch: `gofmt -l .` clean, `go vet ./...` clean, `go test ./...` passes
+    (accounts, api, config, store). The five login calls carry every key the client reads with the
+    exact spelling and case of CLIENT_HTTP 4.2-4.5; user ids start at 1000 in one SQL transaction;
+    refresh tokens are stored only as SHA-256; sessions expire after 15 minutes; a Bearer that is not
+    64 lowercase hex is refused before any lookup; all SQL is parameterised; the per-address creation
+    limit exempts loopback and treats 0 as no limit; codes work once, expire after 5 minutes and are
+    capped at 20 unused per address; hardware fields and tokens never reach the log. Scope, author and
+    commit hygiene correct.
+  - `result` 2 for an unknown, used or expired code: this follows SERVICE.md 4, which the client reads
+    as "Login failed." The only visible effect is that an expired code (or a restart between the code
+    call and the check call) fails at once instead of polling. Accepted; recorded in the handoff.
+  - One low hardening note, no change for this package: `internal/accounts/codes.go` prunes the whole
+    login-code map under the global lock on every `IssueLoginCode`. The per-address cap of 20 bounds a
+    single address, but many source addresses could grow the map and the scan cost within the five-minute
+    window. SERVICE.md sets no global cap; revisit if a global limit is wanted later.
+  - The main checkout's lobby sources were normalised to LF after the merge (they predate the
+    `Servers/Lobby/.gitattributes` added with L1); committed content was already LF, so this only
+    refreshed the working tree.
