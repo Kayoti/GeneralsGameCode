@@ -8,6 +8,9 @@
 #include "../OnlineServices_Init.h"
 #include "../HTTP/HTTPManager.h"
 #include "GameNetwork/GameSpy/PeerDefs.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServersMode.h"
+#endif
 
 // one clock for every websocket timestamp; utc_clock also loads the time zone database on MSVC
 static int64_t NowMs()
@@ -806,7 +809,17 @@ void WebSocket::Tick()
 
 	if (ret != CURLE_RECV_ERROR && ret != CURL_LAST && ret != CURLE_AGAIN && ret != CURLE_GOT_NOTHING)
 	{
-		NetworkLog(ELogVerbosity::LOG_DEBUG, "Got websocket msg: %s", bufferThisRecv);
+#ifdef RTS_SERVERS
+		// A server lobby's start message carries a join token, which must never be logged (PROTOCOL.md, Security).
+		if (strstr(bufferThisRecv, "server_token") != nullptr)
+		{
+			NetworkLog(ELogVerbosity::LOG_DEBUG, "Got websocket msg: <start message redacted>");
+		}
+		else
+#endif
+		{
+			NetworkLog(ELogVerbosity::LOG_DEBUG, "Got websocket msg: %s", bufferThisRecv);
+		}
 		NetworkLog(ELogVerbosity::LOG_DEBUG, "Got websocket len: %d", rlen);
 
 		// any server frame proves liveness, not just a JSON PONG
@@ -1060,6 +1073,18 @@ void WebSocket::Tick()
 											// store URL
                                             NGMP_OnlineServicesManager::GetInstance()->SetScreenshotS3URI_StartMatch(startGameData.screenshot_url.c_str());
 										}
+
+#ifdef RTS_SERVERS
+										// A server lobby's start message adds the member's own session, slot and token (SERVICE.md section 10).
+										// They are read without the strict struct parse so an Online lobby's message, which lacks them, still works.
+										{
+											bool bHasServerFields = jsonObject.contains("server_session");
+											std::string serverSession = bHasServerFields ? jsonObject.value("server_session", std::string()) : std::string();
+											int serverSlot = jsonObject.value("server_slot", -1);
+											std::string serverToken = jsonObject.value("server_token", std::string());
+											ServersMatchSetStartFields(bHasServerFields, serverSession.c_str(), serverSlot, serverToken.c_str());
+										}
+#endif
 
 										// always start, even if we couldnt parse the url
                                         NGMP_OnlineServices_LobbyInterface* pLobbyInterface = NGMP_OnlineServicesManager::GetInterface<NGMP_OnlineServices_LobbyInterface>();

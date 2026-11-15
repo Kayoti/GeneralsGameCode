@@ -32,6 +32,8 @@
 #include "GameNetwork/ServerEntryCheck.h"
 #include "GameNetwork/ServerRegions.h"
 
+class ServerLink;
+
 // State ------------------------------------------------------------------------------------------
 
 Bool ServersModeIsOn();																	///< True between a passed entry check and leaving the online lobby
@@ -122,5 +124,58 @@ ServersGateResult ServersGateUpdate( UnsignedInt handled, ServersGate *action );
 
 /// Logs out of the online service with a full teardown, which leaves the lobby and returns to the main menu, and turns Servers mode off.
 void ServersLogoutOnline();
+
+// Match start from a server lobby ---------------------------------------------------------------
+// The match-start flow of a server lobby (PROTOCOL.md 5.4). The host opens the relay session, hands
+// the service the join tokens and sends the start message; every member connects to the relay with its
+// own token. The one relay link of the match is owned here until the launch takes it, or a failure
+// closes it. Only the relay handshake, the service calls and the timeouts live here: the caller (the
+// staging menu) owns the buttons, the status lines and the launch itself.
+
+enum ServersMatchOutcome
+{
+	SERVERS_MATCH_IDLE,			///< Nothing is happening, or a flow is still running
+	SERVERS_MATCH_LAUNCH,		///< Returned once: the relay slot is held, the caller launches the match now
+	SERVERS_MATCH_ABORTED,	///< Returned once (host, before the start message): the lobby stays open and Start is re-enabled
+	SERVERS_MATCH_FAILED,		///< Returned once: the match could not be joined, so the caller leaves the lobby and returns to the list
+};
+
+/// True while a host or member match-start flow is running. ServersMatchUpdate() must be called each frame while true.
+Bool ServersMatchIsActive();
+
+/**
+ * The host's countdown ended in a server lobby. Opens the relay session (silent entry check first if the
+ * pass is about to expire), posts the join tokens to the service and sends the start message. Only valid
+ * for the host of a server lobby. Does nothing if a flow is already running.
+ */
+void ServersMatchBeginHost();
+
+/**
+ * Stores the server fields of a received start message (message 13), ready for ServersMatchBeginMemberFromStartMessage().
+ * present is FALSE when the message carried no server_session. Called from the start-message handler for every message,
+ * so an Online lobby's message simply stores "not present".
+ */
+void ServersMatchSetStartFields( Bool present, const char *serverSessionHex, Int serverSlot, const char *serverTokenHex );
+
+/**
+ * A member begins its JOIN to the relay from the fields stored by ServersMatchSetStartFields(). If no valid
+ * fields were stored the flow fails at once, so ServersMatchUpdate() returns SERVERS_MATCH_FAILED next.
+ */
+void ServersMatchBeginMemberFromStartMessage();
+
+/// Call each frame while ServersMatchIsActive(). Drives the relay link, the timeouts and the service calls. Does not block.
+ServersMatchOutcome ServersMatchUpdate();
+
+/// The message to show for the SERVERS_MATCH_ABORTED or SERVERS_MATCH_FAILED outcome just returned.
+UnicodeString ServersMatchGetMessage();
+
+/**
+ * Takes the connected relay link for the launch. Ownership passes to the caller (the connection manager drives
+ * it from here on). Returns NULL when no server-lobby match is starting. Called once, by NGMPGame::launchGame.
+ */
+ServerLink *ServersMatchTakeLink();
+
+/// Forgets any match-start state and closes the relay link if it is still owned here. Safe to call at any time.
+void ServersMatchReset();
 
 #endif // RTS_SERVERS

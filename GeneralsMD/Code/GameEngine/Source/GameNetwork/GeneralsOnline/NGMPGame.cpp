@@ -15,6 +15,7 @@
 #ifdef RTS_SERVERS
 #include "GameNetwork/ConnectionManager.h"
 #include "GameNetwork/ServerLink.h"
+#include "GameNetwork/ServersMode.h"
 #endif
 
 NGMPGameSlot::NGMPGameSlot()
@@ -477,9 +478,28 @@ void NGMPGame::launchGame(void)
 	// Time to initialize TheNetwork for this game.
 	TheNetwork = NetworkInterface::createNetwork();
 	TheNetwork->init();
-	
+
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 15/11/2026 A server-lobby match runs through the relay. Take the connected
+	// link and set server mode BEFORE initTransport (so no NextGenTransport is built) and before parseUserList
+	// (so no player-to-player connections are made), the same ordering as the launch-flag path (DECISIONS.md D50).
+	ServerLink* serversLink = ServersMatchTakeLink();
+	const Bool bServerMatch = (serversLink != NULL);
+	if (bServerMatch)
+	{
+		ConnectionManager* conMgr = TheNetwork->GetConnectionManager();
+		conMgr->setServerMode(TRUE);
+		conMgr->attachServerLink(serversLink);
+	}
+#endif
+
 	NetworkMesh* pMesh = NGMP_OnlineServicesManager::GetNetworkMesh();
-	if (pMesh != nullptr)
+	// In server mode there are no player-to-player connections, so the mesh carries no latency to seed from.
+	if (
+#ifdef RTS_SERVERS
+		!bServerMatch &&
+#endif
+		pMesh != nullptr)
 	{
 
 		TheNetwork->SeedLatencyData(pMesh->getMaximumHistoricalLatency());
@@ -496,7 +516,13 @@ void NGMPGame::launchGame(void)
 		TheGameLogic->clearGameData();
 	}
 
-	Bool filesOk = DoAnyMapTransfers(this);
+	// TheSuperHackers @feature Kayoti 15/11/2026 Map transfer is never used in server mode (DECISIONS.md D32): every
+	// player already has the map, and there is no transport to carry one.
+	Bool filesOk =
+#ifdef RTS_SERVERS
+		bServerMatch ? TRUE :
+#endif
+		DoAnyMapTransfers(this);
 
 	// see if we really have the map.  if not, back out.
 	TheMapCache->updateCache();

@@ -59,7 +59,18 @@ void HTTPRequest::SetPostData(const char* szPostData)
 	// TODO_HTTP: Error if verb isnt post
 	m_strPostData = std::string(szPostData);
 
-	NetworkLog(ELogVerbosity::LOG_DEBUG, "[%p|%s|Verb %d] Transfer is created: Body is %s", this, m_strURI.c_str(), m_httpVerb, szPostData);
+#ifdef RTS_SERVERS
+	// TheSuperHackers @feature Kayoti 15/11/2026 A server session body (field 19) carries the match session id and the
+	// join tokens; keep it out of the request log (PROTOCOL.md, Security).
+	if (m_strPostData.find("server_session") != std::string::npos)
+	{
+		NetworkLog(ELogVerbosity::LOG_DEBUG, "[%p|%s|Verb %d] Transfer is created: Body is <redacted>", this, m_strURI.c_str(), m_httpVerb);
+	}
+	else
+#endif
+	{
+		NetworkLog(ELogVerbosity::LOG_DEBUG, "[%p|%s|Verb %d] Transfer is created: Body is %s", this, m_strURI.c_str(), m_httpVerb, szPostData);
+	}
 }
 
 void HTTPRequest::SetPostDataBuffer(std::vector<uint8_t> vecBuffer)
@@ -76,7 +87,17 @@ void HTTPRequest::StartRequest()
 
 	m_currentBufSize_Used = 0;
 
-	NetworkLog(ELogVerbosity::LOG_DEBUG, "[%p|%s|Verb %d] Transfer is starting: Body is %s", this, m_strURI.c_str(), m_httpVerb, m_strPostData.c_str());
+#ifdef RTS_SERVERS
+	// Keep a server session body (field 19) out of the log (PROTOCOL.md, Security).
+	if (m_strPostData.find("server_session") != std::string::npos)
+	{
+		NetworkLog(ELogVerbosity::LOG_DEBUG, "[%p|%s|Verb %d] Transfer is starting: Body is <redacted>", this, m_strURI.c_str(), m_httpVerb);
+	}
+	else
+#endif
+	{
+		NetworkLog(ELogVerbosity::LOG_DEBUG, "[%p|%s|Verb %d] Transfer is starting: Body is %s", this, m_strURI.c_str(), m_httpVerb, m_strPostData.c_str());
+	}
 	PlatformStartRequest();
 }
 
