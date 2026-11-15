@@ -35,6 +35,9 @@
 #include "GameClient/TerrainVisual.h" // for TERRAIN_LOD_MIN definition
 #include "GameClient/GameText.h"
 #include "GameNetwork/NetworkDefs.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServersDirect.h"
+#endif
 #include "WWLib/trim.h"
 
 
@@ -840,6 +843,67 @@ Int parseQuickStart( char *args[], int num )
 	return 1;
 }
 
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 15/11/2026 Launch flags that start a relay match without the lobby.
+// The values are validated and stored by ServersDirect; a bad or missing value is logged and makes the
+// whole set unusable, so the game starts normally. Documented in docs/servers/TESTING.md.
+
+Int parseServersHost( char *args[], int num )
+{
+	ServersDirectSetFlag( SERVERS_DIRECT_FLAG_HOST, NULL );
+	return 1;
+}
+
+Int parseServersJoin( char *args[], int num )
+{
+	ServersDirectSetFlag( SERVERS_DIRECT_FLAG_JOIN, NULL );
+	return 1;
+}
+
+// A value flag at the end of the line with no value passes null, which ServersDirect rejects.
+Int parseServersRelay( char *args[], int num )
+{
+	ServersDirectSetFlag( SERVERS_DIRECT_FLAG_RELAY, num > 1 ? args[1] : NULL );
+	return num > 1 ? 2 : 1;
+}
+
+Int parseServersPort( char *args[], int num )
+{
+	ServersDirectSetFlag( SERVERS_DIRECT_FLAG_PORT, num > 1 ? args[1] : NULL );
+	return num > 1 ? 2 : 1;
+}
+
+Int parseServersSlot( char *args[], int num )
+{
+	ServersDirectSetFlag( SERVERS_DIRECT_FLAG_SLOT, num > 1 ? args[1] : NULL );
+	return num > 1 ? 2 : 1;
+}
+
+Int parseServersPlayers( char *args[], int num )
+{
+	ServersDirectSetFlag( SERVERS_DIRECT_FLAG_PLAYERS, num > 1 ? args[1] : NULL );
+	return num > 1 ? 2 : 1;
+}
+
+Int parseServersMap( char *args[], int num )
+{
+	ServersDirectSetFlag( SERVERS_DIRECT_FLAG_MAP, num > 1 ? args[1] : NULL );
+	return num > 1 ? 2 : 1;
+}
+
+Int parseServersSession( char *args[], int num )
+{
+	ServersDirectSetFlag( SERVERS_DIRECT_FLAG_SESSION, num > 1 ? args[1] : NULL );
+	return num > 1 ? 2 : 1;
+}
+
+Int parseServersToken( char *args[], int num )
+{
+	ServersDirectSetFlag( SERVERS_DIRECT_FLAG_TOKEN, num > 1 ? args[1] : NULL );
+	return num > 1 ? 2 : 1;
+}
+#endif // RTS_SERVERS
+
 Int parseConstantDebug( char *args[], int num )
 {
 	TheWritableGlobalData->m_constantDebugUpdate = TRUE;
@@ -1189,6 +1253,19 @@ static CommandLineParam paramsForEngineInit[] =
 	{ "-noshaders", parseNoShaders },
 	{ "-quickstart", parseQuickStart },
 	{ "-useWaveEditor", parseUseWaveEditor },
+
+#ifdef RTS_SERVERS
+	// Start a relay match directly from the command line, without the lobby (docs/servers/TESTING.md).
+	{ "-serversHost", parseServersHost },
+	{ "-serversJoin", parseServersJoin },
+	{ "-serversRelay", parseServersRelay },
+	{ "-serversPort", parseServersPort },
+	{ "-serversSlot", parseServersSlot },
+	{ "-serversPlayers", parseServersPlayers },
+	{ "-serversMap", parseServersMap },
+	{ "-serversSession", parseServersSession },
+	{ "-serversToken", parseServersToken },
+#endif
 
 	// TheSuperHackers @feature xezon 03/08/2025 Force full viewport for 'Control Bar Pro' Addons like GenTool did it.
 	{ "-forcefullviewport", parseFullViewport },

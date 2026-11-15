@@ -116,6 +116,9 @@
 #include "GameNetwork/GeneralsOnline/ServiceHosts.h"
 #include "GameNetwork/GeneralsOnline/OnlineServices_LobbyInterface.h"
 #include "GameNetwork/GameSpyOverlay.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServersDirect.h"
+#endif
 #include <chrono>
 #include "WW3D2/ww3d.h"
 
@@ -996,6 +999,12 @@ void GameEngine::update()
 			TheAudio->UPDATE();
 			TheGameClient->UPDATE();
 			TheMessageStream->propagateMessages();
+
+#ifdef RTS_SERVERS
+			// TheSuperHackers @feature Kayoti 15/11/2026 Drive the launch-flag relay match start. Does nothing
+			// without the -serversHost or -serversJoin flags (docs/servers/TESTING.md).
+			ServersDirectUpdate();
+#endif
 
             if (TheNetwork != nullptr)
             {
