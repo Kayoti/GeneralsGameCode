@@ -138,6 +138,16 @@ type startGameMessage struct {
 	ScreenshotURL string `json:"screenshot_url"`
 }
 
+// serverStartGameMessage is message 13 for a member of a server lobby
+// (SERVICE.md section 10). ServerToken is empty for the host.
+type serverStartGameMessage struct {
+	MsgID         int    `json:"msg_id"`
+	ScreenshotURL string `json:"screenshot_url"`
+	ServerSession string `json:"server_session"`
+	ServerSlot    int    `json:"server_slot"`
+	ServerToken   string `json:"server_token"`
+}
+
 // startSignallingMessage is message 17: the receiver starts a connection to
 // UserID. PreferredPort is always 0 and MiddlewareID empty (SERVICE.md section 8.2).
 type startSignallingMessage struct {

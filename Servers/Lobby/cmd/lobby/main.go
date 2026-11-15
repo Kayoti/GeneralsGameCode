@@ -15,6 +15,7 @@ import (
 	"servers-lobby/internal/accounts"
 	"servers-lobby/internal/api"
 	"servers-lobby/internal/config"
+	"servers-lobby/internal/pass"
 	"servers-lobby/internal/realtime"
 	"servers-lobby/internal/store"
 )
@@ -52,6 +53,10 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	passes, err := pass.Load(cfg.Regions)
+	if err != nil {
+		return err
+	}
 	db, err := store.Open(cfg.Database)
 	if err != nil {
 		return err
@@ -61,7 +66,7 @@ func run(args []string) error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	accountService := accounts.New(db, cfg.AccountsPerAddressPerHour)
 	hub := realtime.NewHub(realtime.DefaultSettings(cfg.Rooms), accountService, logger)
-	options := api.Options{TrustForwardedFor: cfg.TrustForwardedFor, WSURI: cfg.PublicWSURL, MOTD: cfg.MOTD, TurnSecret: cfg.TurnSecret}
+	options := api.Options{TrustForwardedFor: cfg.TrustForwardedFor, WSURI: cfg.PublicWSURL, MOTD: cfg.MOTD, TurnSecret: cfg.TurnSecret, Passes: passes}
 	server := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           api.NewHandler(options, accountService, hub, logger),

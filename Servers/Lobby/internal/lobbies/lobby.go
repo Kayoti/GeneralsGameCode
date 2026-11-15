@@ -61,6 +61,7 @@ var (
 	ErrLobbyLocked   = errors.New("the lobby is locked by a countdown")
 	ErrWrongPassword = errors.New("the password does not match")
 	ErrLobbyFull     = errors.New("the lobby has no free slot")
+	ErrPassRefused   = errors.New("the pass is missing or not valid for the lobby")
 )
 
 // InvalidError says why a create request was refused.
@@ -130,6 +131,11 @@ type Lobby struct {
 	joinCounter       uint64
 	lockedUntil       time.Time
 	hasStarted        bool
+	// isServer and regionTag mark a server lobby (SERVICE.md section 10); both are set at creation and never change.
+	isServer  bool
+	regionTag string
+	// session is the server session the host stored, or nil.
+	session *serverSession
 }
 
 // NewLobby creates a lobby with the host in slot 0 (SERVICE.md section 7.2).
@@ -152,6 +158,9 @@ func NewLobby(id int64, hostID int64, request CreateRequest, rngSeed int) (*Lobb
 	if utf8.RuneCountInString(request.Password) > maxPasswordCharacters {
 		return nil, &InvalidError{Reason: "password is too long"}
 	}
+	if request.ServerMode && request.RegionTag == "" {
+		return nil, &InvalidError{Reason: "a server lobby needs a region"}
+	}
 	lobby := &Lobby{
 		id:               id,
 		owner:            hostID,
@@ -168,6 +177,10 @@ func NewLobby(id int64, hostID int64, request CreateRequest, rngSeed int) (*Lobb
 		iniCRC:           request.IniCRC,
 		rngSeed:          rngSeed,
 		joinability:      joinabilityPublic,
+		isServer:         request.ServerMode,
+	}
+	if lobby.isServer {
+		lobby.regionTag = request.RegionTag
 	}
 	if request.Passworded {
 		lobby.password = request.Password
@@ -209,6 +222,11 @@ func (lobby *Lobby) ID() int64 {
 // Owner returns the host's user id.
 func (lobby *Lobby) Owner() int64 {
 	return lobby.owner
+}
+
+// IsServer reports whether the lobby is a server lobby (LobbyType 2).
+func (lobby *Lobby) IsServer() bool {
+	return lobby.isServer
 }
 
 // HasStarted reports whether the match has started.
@@ -266,6 +284,9 @@ func (lobby *Lobby) Join(userID int64, request JoinRequest, now time.Time) error
 	if lobby.password != "" && subtle.ConstantTimeCompare([]byte(lobby.password), []byte(request.Password)) != 1 {
 		return ErrWrongPassword
 	}
+	if lobby.isServer && (request.Admit == nil || !request.Admit(lobby.regionTag, lobby.exeCRC, lobby.iniCRC)) {
+		return ErrPassRefused
+	}
 	for index, entry := range lobby.slots {
 		if entry.state != SlotOpen {
 			continue
@@ -276,6 +297,7 @@ func (lobby *Lobby) Join(userID int64, request JoinRequest, now time.Time) error
 		member.joinOrder = lobby.joinCounter
 		lobby.joinCounter++
 		lobby.slots[index] = member
+		lobby.session = nil
 		return nil
 	}
 	return ErrLobbyFull
@@ -292,6 +314,7 @@ func (lobby *Lobby) Remove(userID int64) (isEmpty bool) {
 		return false
 	}
 	lobby.slots[index] = emptySlot(SlotOpen)
+	lobby.session = nil
 	if len(lobby.Humans()) == 0 {
 		return true
 	}
@@ -337,6 +360,9 @@ func (lobby *Lobby) SetReady(userID int64, isReady bool, now time.Time) bool {
 	if !found || lobby.IsLocked(now) {
 		return false
 	}
+	if isReady && lobby.isServer && userID != lobby.owner && !lobby.slots[index].hasMap {
+		return false
+	}
 	lobby.slots[index].isReady = isReady
 	lobby.keepHostReady()
 	return true
@@ -365,6 +391,7 @@ func (lobby *Lobby) EndCountdown(userID int64) bool {
 // Start marks the lobby as started with the given match id (SERVICE.md
 // section 7.5 steps 1 and 2). It returns false, and changes nothing, unless
 // the user is the host, the lobby has not started and every human is ready.
+// A server lobby also needs at least 2 humans and a stored server session.
 func (lobby *Lobby) Start(userID int64, matchID uint64) bool {
 	if userID != lobby.owner || lobby.hasStarted || !lobby.IsMember(userID) {
 		return false
@@ -373,6 +400,9 @@ func (lobby *Lobby) Start(userID int64, matchID uint64) bool {
 		if entry.isHuman() && !entry.isReady {
 			return false
 		}
+	}
+	if lobby.isServer && (len(lobby.Humans()) < minServerHumans || lobby.session == nil) {
+		return false
 	}
 	lobby.matchID = matchID
 	lobby.hasStarted = true

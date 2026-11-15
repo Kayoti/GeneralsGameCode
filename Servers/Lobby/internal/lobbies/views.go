@@ -4,8 +4,11 @@
 
 package lobbies
 
-// LobbyType of an Online lobby (SERVICE.md section 7.1). Server lobbies, type 2, come with L6.
-const lobbyTypeOnline = 0
+// LobbyType of an Online lobby and of a server lobby (SERVICE.md section 7.1).
+const (
+	lobbyTypeOnline = 0
+	lobbyTypeServer = 2
+)
 
 // lobbyHeader holds the lobby-level keys that the list and the detail share.
 // The key spelling is the client's.
@@ -81,7 +84,7 @@ func (lobby *Lobby) header() lobbyHeader {
 			occupied++
 		}
 	}
-	return lobbyHeader{
+	header := lobbyHeader{
 		LobbyID:             lobby.id,
 		Owner:               lobby.owner,
 		Name:                lobby.name,
@@ -103,6 +106,11 @@ func (lobby *Lobby) header() lobbyHeader {
 		LobbyType:           lobbyTypeOnline,
 		Region:              "",
 	}
+	if lobby.isServer {
+		header.LobbyType = lobbyTypeServer
+		header.Region = lobby.regionTag
+	}
+	return header
 }
 
 // displayName returns the name shown for a slot: the player's name, or empty

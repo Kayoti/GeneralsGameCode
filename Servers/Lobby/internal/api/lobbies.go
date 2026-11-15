@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"servers-lobby/internal/lobbies"
+	"servers-lobby/internal/pass"
 	"servers-lobby/internal/realtime"
 )
 
@@ -31,12 +32,11 @@ const (
 	outcomeSegment = "Outcome"
 )
 
-// fieldServerSession is field 19 of POST Lobby/{id}. It belongs to server
-// lobbies, which the service does not have yet, so it is always refused.
-const fieldServerSession = 19
-
 // Values of the result of field 19 (SERVICE.md section 10).
-const serverSessionRefused = 0
+const (
+	serverSessionRefused = 0
+	serverSessionStored  = 1
+)
 
 // listLatencyMs is the one latency given per lobby in GET Lobbies (SERVICE.md section 5.1).
 const listLatencyMs = 0
@@ -187,6 +187,14 @@ func (routes *server) createLobbyCall(w http.ResponseWriter, r *http.Request, us
 		writeAnswer(w, http.StatusOK, failed)
 		return
 	}
+	if request.ServerMode {
+		tag, ok := routes.passes.Check(r.Header.Get(pass.Header), time.Now(), request.ExeCRC, request.IniCRC)
+		if !ok {
+			writeAnswer(w, http.StatusOK, failed)
+			return
+		}
+		request.RegionTag = tag
+	}
 	lobbyID, err := routes.hub.CreateLobby(userID, request)
 	if err != nil {
 		var invalid *lobbies.InvalidError
@@ -196,7 +204,7 @@ func (routes *server) createLobbyCall(w http.ResponseWriter, r *http.Request, us
 		writeAnswer(w, http.StatusOK, failed)
 		return
 	}
-	username, token := turnCredentials(routes.turnSecret, userID, time.Now())
+	username, token := routes.turnFor(request.ServerMode, userID)
 	writeAnswer(w, http.StatusOK, createLobbyAnswer{
 		Result: createResultSucceeded, LobbyID: lobbyID, TurnUsername: username, TurnToken: token,
 	})
@@ -220,6 +228,7 @@ var joinStatuses = []struct {
 	{lobbies.ErrLobbyNotFound, http.StatusNotFound},
 	{lobbies.ErrLobbyLocked, http.StatusNotAcceptable},
 	{lobbies.ErrWrongPassword, http.StatusUnauthorized},
+	{lobbies.ErrPassRefused, http.StatusForbidden},
 	{lobbies.ErrLobbyFull, http.StatusNotAcceptable},
 	{realtime.ErrNotConnected, http.StatusNotFound},
 }
@@ -232,9 +241,14 @@ func (routes *server) joinLobbyCall(w http.ResponseWriter, r *http.Request, user
 		writeJSON(w, http.StatusBadRequest, emptyObject)
 		return
 	}
-	err := routes.hub.JoinLobby(userID, lobbyID, request)
+	header := r.Header.Get(pass.Header)
+	request.Admit = func(regionTag string, exeCRC uint32, iniCRC uint32) bool {
+		tag, ok := routes.passes.Check(header, time.Now(), exeCRC, iniCRC)
+		return ok && tag == regionTag
+	}
+	isServer, err := routes.hub.JoinLobby(userID, lobbyID, request)
 	if err == nil {
-		username, token := turnCredentials(routes.turnSecret, userID, time.Now())
+		username, token := routes.turnFor(isServer, userID)
 		writeAnswer(w, http.StatusOK, joinLobbyAnswer{Success: true, TurnUsername: username, TurnToken: token})
 		return
 	}
@@ -248,16 +262,23 @@ func (routes *server) joinLobbyCall(w http.ResponseWriter, r *http.Request, user
 }
 
 // changeLobbyCall answers POST Lobby/{id}: 200 with an empty object, and a
-// refused change has no effect. Field 19 answers with a result, and is refused
-// because the service has no server lobbies yet.
+// refused change has no effect. Field 19 answers with a result (SERVICE.md section 10).
 func (routes *server) changeLobbyCall(w http.ResponseWriter, r *http.Request, userID int64, lobbyID int64) {
 	var request lobbies.FieldRequest
-	if err := readJSONBody(r, &request); err != nil {
+	// A key of the wrong type makes the read fail, but the keys that could be
+	// read are kept, so a field 19 with a bad key is still answered with result 0.
+	err := readJSONBody(r, &request)
+	isSession := request.Field != nil && *request.Field == lobbies.FieldServerSession
+	if err != nil && !isSession {
 		writeJSON(w, http.StatusOK, emptyObject)
 		return
 	}
-	if request.Field != nil && *request.Field == fieldServerSession {
-		writeAnswer(w, http.StatusOK, serverSessionAnswer{Result: serverSessionRefused})
+	if isSession {
+		result := serverSessionRefused
+		if err == nil && routes.hub.SetServerSession(userID, lobbyID, request) {
+			result = serverSessionStored
+		}
+		writeAnswer(w, http.StatusOK, serverSessionAnswer{Result: result})
 		return
 	}
 	routes.hub.ChangeLobby(userID, lobbyID, request)

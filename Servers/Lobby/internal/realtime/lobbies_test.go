@@ -118,7 +118,7 @@ func mustCreate(t *testing.T, service *testService, host *testPlayer, maxPlayers
 // mustJoin puts the player in the lobby.
 func mustJoin(t *testing.T, service *testService, joiner *testPlayer, lobbyID int64) {
 	t.Helper()
-	if err := service.hub.JoinLobby(joiner.id, lobbyID, lobbies.JoinRequest{HasMap: true}); err != nil {
+	if _, err := service.hub.JoinLobby(joiner.id, lobbyID, lobbies.JoinRequest{HasMap: true}); err != nil {
 		t.Fatalf("JoinLobby returned error: %v", err)
 	}
 }
@@ -283,10 +283,10 @@ func TestPasswordMessagesChangeAndRemoveThePassword(t *testing.T) {
 	if got := ids(sendSync(t, host.socket, map[string]any{"msg_id": 25, "new_password": "secret"})); len(got) != 1 || got[0] != MsgLobbyCurrentLobbyUpdate {
 		t.Fatalf("the host got %v after changing the password, want one 6", got)
 	}
-	if err := service.hub.JoinLobby(guest.id, lobbyID, lobbies.JoinRequest{Password: "wrong"}); !errors.Is(err, lobbies.ErrWrongPassword) {
+	if _, err := service.hub.JoinLobby(guest.id, lobbyID, lobbies.JoinRequest{Password: "wrong"}); !errors.Is(err, lobbies.ErrWrongPassword) {
 		t.Fatalf("join with a wrong password: error = %v", err)
 	}
-	if err := service.hub.JoinLobby(guest.id, lobbyID, lobbies.JoinRequest{Password: "secret"}); err != nil {
+	if _, err := service.hub.JoinLobby(guest.id, lobbyID, lobbies.JoinRequest{Password: "secret"}); err != nil {
 		t.Fatalf("join with the right password: error = %v", err)
 	}
 	settle(t, host.socket)
@@ -294,14 +294,14 @@ func TestPasswordMessagesChangeAndRemoveThePassword(t *testing.T) {
 	send(t, guest.socket, map[string]any{"msg_id": 24})
 	send(t, guest.socket, map[string]any{"msg_id": 25, "new_password": "mine"})
 	settle(t, guest.socket)
-	if err := service.hub.JoinLobby(other.id, lobbyID, lobbies.JoinRequest{Password: "mine"}); !errors.Is(err, lobbies.ErrWrongPassword) {
+	if _, err := service.hub.JoinLobby(other.id, lobbyID, lobbies.JoinRequest{Password: "mine"}); !errors.Is(err, lobbies.ErrWrongPassword) {
 		t.Fatalf("a member changed the password: error = %v", err)
 	}
 	send(t, host.socket, map[string]any{"msg_id": 25, "new_password": ""})
 	send(t, host.socket, map[string]any{"msg_id": 25})
 	send(t, host.socket, map[string]any{"msg_id": 24})
 	settle(t, host.socket)
-	if err := service.hub.JoinLobby(other.id, lobbyID, lobbies.JoinRequest{}); err != nil {
+	if _, err := service.hub.JoinLobby(other.id, lobbyID, lobbies.JoinRequest{}); err != nil {
 		t.Fatalf("join after the password was removed: error = %v", err)
 	}
 }
@@ -315,14 +315,14 @@ func TestCountdownLocksJoinsAndMemberChangesAndEndsAfterTheLockTime(t *testing.T
 
 	send(t, guest.socket, map[string]any{"msg_id": 23})
 	settle(t, guest.socket)
-	if err := service.hub.JoinLobby(late.id, lobbyID, lobbies.JoinRequest{}); err != nil {
+	if _, err := service.hub.JoinLobby(late.id, lobbyID, lobbies.JoinRequest{}); err != nil {
 		t.Fatalf("a countdown from a member locked the lobby: %v", err)
 	}
 	service.hub.LeaveLobby(late.id, lobbyID)
 
 	send(t, host.socket, map[string]any{"msg_id": 23})
 	settle(t, host.socket)
-	if err := service.hub.JoinLobby(late.id, lobbyID, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrLobbyLocked) {
+	if _, err := service.hub.JoinLobby(late.id, lobbyID, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrLobbyLocked) {
 		t.Fatalf("join while locked: error = %v", err)
 	}
 	send(t, guest.socket, map[string]any{"msg_id": 5, "ready": true})
@@ -332,7 +332,7 @@ func TestCountdownLocksJoinsAndMemberChangesAndEndsAfterTheLockTime(t *testing.T
 	}
 
 	time.Sleep(lobbyWait + 50*time.Millisecond)
-	if err := service.hub.JoinLobby(late.id, lobbyID, lobbies.JoinRequest{}); err != nil {
+	if _, err := service.hub.JoinLobby(late.id, lobbyID, lobbies.JoinRequest{}); err != nil {
 		t.Fatalf("join after the lock ended: %v", err)
 	}
 }
@@ -349,12 +349,12 @@ func TestANewMessage26EndsTheCountdownLock(t *testing.T) {
 	settle(t, host.socket)
 	send(t, late.socket, map[string]any{"msg_id": 26})
 	settle(t, late.socket)
-	if err := service.hub.JoinLobby(late.id, lobbyID, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrLobbyLocked) {
+	if _, err := service.hub.JoinLobby(late.id, lobbyID, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrLobbyLocked) {
 		t.Fatalf("a 26 from a non-member ended the lock: error = %v", err)
 	}
 	send(t, host.socket, map[string]any{"msg_id": 26})
 	settle(t, host.socket)
-	if err := service.hub.JoinLobby(late.id, lobbyID, lobbies.JoinRequest{}); err != nil {
+	if _, err := service.hub.JoinLobby(late.id, lobbyID, lobbies.JoinRequest{}); err != nil {
 		t.Fatalf("join after the host's 26: error = %v", err)
 	}
 }
@@ -409,7 +409,7 @@ func TestStartSendsSixThenThirteenToEveryHumanAndLeavesTheList(t *testing.T) {
 	if len(service.hub.ListLobbies()) != 0 {
 		t.Error("a started lobby is still listed")
 	}
-	if err := service.hub.JoinLobby(watcher.id, lobbyID, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrLobbyNotFound) {
+	if _, err := service.hub.JoinLobby(watcher.id, lobbyID, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrLobbyNotFound) {
 		t.Errorf("join after the start: error = %v", err)
 	}
 	send(t, host.socket, map[string]any{"msg_id": 13})
@@ -542,7 +542,7 @@ func TestLastMemberLeavingDeletesTheLobbyAndTellsTheWatchers(t *testing.T) {
 	if len(service.hub.ListLobbies()) != 0 {
 		t.Error("the empty lobby is still listed")
 	}
-	if err := service.hub.JoinLobby(watcher.id, lobbyID, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrLobbyNotFound) {
+	if _, err := service.hub.JoinLobby(watcher.id, lobbyID, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrLobbyNotFound) {
 		t.Errorf("join of a deleted lobby: error = %v", err)
 	}
 }
@@ -607,11 +607,11 @@ func TestAFailedJoinKeepsThePlayerInItsLobby(t *testing.T) {
 	hostLobby := mustCreate(t, service, host, 4)
 	guestLobby := mustCreate(t, service, guest, 4)
 
-	if err := service.hub.JoinLobby(host.id, 999, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrLobbyNotFound) {
+	if _, err := service.hub.JoinLobby(host.id, 999, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrLobbyNotFound) {
 		t.Fatalf("join of an unknown lobby: error = %v", err)
 	}
 	service.hub.hubLobbyForTest(guestLobby, func(lobby *lobbies.Lobby) { lobby.SetPassword(guest.id, "pw") })
-	if err := service.hub.JoinLobby(host.id, guestLobby, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrWrongPassword) {
+	if _, err := service.hub.JoinLobby(host.id, guestLobby, lobbies.JoinRequest{}); !errors.Is(err, lobbies.ErrWrongPassword) {
 		t.Fatalf("join with no password: error = %v", err)
 	}
 	if _, found := service.hub.LobbyDetail(host.id, hostLobby); !found {
@@ -659,7 +659,7 @@ func TestAccountWithoutAWebSocketCannotCreateOrJoin(t *testing.T) {
 	if _, err := service.hub.CreateLobby(stranger, createRequest(4)); !errors.Is(err, ErrNotConnected) {
 		t.Errorf("CreateLobby error = %v, want ErrNotConnected", err)
 	}
-	if err := service.hub.JoinLobby(stranger, lobbyID, lobbies.JoinRequest{}); !errors.Is(err, ErrNotConnected) {
+	if _, err := service.hub.JoinLobby(stranger, lobbyID, lobbies.JoinRequest{}); !errors.Is(err, ErrNotConnected) {
 		t.Errorf("JoinLobby error = %v, want ErrNotConnected", err)
 	}
 }
@@ -688,10 +688,10 @@ func TestConcurrentLobbyCallsKeepTheStateConsistent(t *testing.T) {
 		go func() {
 			defer group.Done()
 			for range 20 {
-				_ = service.hub.JoinLobby(member.id, lobbyID, lobbies.JoinRequest{})
+				_, _ = service.hub.JoinLobby(member.id, lobbyID, lobbies.JoinRequest{})
 				service.hub.LeaveLobby(member.id, lobbyID)
 			}
-			_ = service.hub.JoinLobby(member.id, lobbyID, lobbies.JoinRequest{})
+			_, _ = service.hub.JoinLobby(member.id, lobbyID, lobbies.JoinRequest{})
 		}()
 	}
 	group.Wait()
