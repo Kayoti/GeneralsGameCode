@@ -18,7 +18,7 @@ func loggedRequest(t *testing.T, trustForwardedFor bool, request *http.Request) 
 	t.Helper()
 	var logBuffer bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logBuffer, nil))
-	handler := NewHandler(trustForwardedFor, testWSURI, accounts.New(openTestDB(t), 0), logger)
+	handler := buildHandler(Options{TrustForwardedFor: trustForwardedFor, WSURI: testWSURI}, accounts.New(openTestDB(t), 0), logger)
 	handler.ServeHTTP(httptest.NewRecorder(), request)
 	return logBuffer.String()
 }

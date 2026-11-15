@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"servers-lobby/internal/accounts"
+	"servers-lobby/internal/realtime"
 	"servers-lobby/internal/store"
 )
 
@@ -21,6 +22,16 @@ const testPrefix = "/env/prod/contract/1/"
 
 // testWSURI is the ws_uri of the test service.
 const testWSURI = "ws://127.0.0.1:9000/ws"
+
+// testMOTD is the message of the day of the test service.
+const testMOTD = "Welcome to the test"
+
+// buildHandler returns the handler of a service with one room, named Lobby,
+// and the default timeouts.
+func buildHandler(options Options, service *accounts.Service, logger *slog.Logger) http.Handler {
+	hub := realtime.NewHub(realtime.DefaultSettings([]string{"Lobby"}), service, logger)
+	return NewHandler(options, service, hub, logger)
+}
 
 // openTestDB opens a new database file for one test.
 func openTestDB(t *testing.T) *store.Store {
@@ -38,7 +49,7 @@ func openTestDB(t *testing.T) *store.Store {
 func testHandler(t *testing.T) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	return NewHandler(false, testWSURI, accounts.New(openTestDB(t), 0), logger)
+	return buildHandler(Options{WSURI: testWSURI, MOTD: testMOTD}, accounts.New(openTestDB(t), 0), logger)
 }
 
 func perform(t *testing.T, handler http.Handler, method, path string, body string) *httptest.ResponseRecorder {

@@ -34,6 +34,11 @@ func (recorder *statusRecorder) WriteHeader(status int) {
 	recorder.ResponseWriter.WriteHeader(status)
 }
 
+// Unwrap lets the WebSocket upgrade reach the connection under the recorder.
+func (recorder *statusRecorder) Unwrap() http.ResponseWriter {
+	return recorder.ResponseWriter
+}
+
 func (recorder *statusRecorder) Write(data []byte) (int, error) {
 	if recorder.status == 0 {
 		recorder.status = http.StatusOK

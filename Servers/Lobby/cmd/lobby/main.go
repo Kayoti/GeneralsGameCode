@@ -15,13 +15,20 @@ import (
 	"servers-lobby/internal/accounts"
 	"servers-lobby/internal/api"
 	"servers-lobby/internal/config"
+	"servers-lobby/internal/realtime"
 	"servers-lobby/internal/store"
 )
 
-// readHeaderTimeout limits how long a client may take to send the request
-// headers. The documents do not set it; it stops idle connections from
-// holding a slot open.
-const readHeaderTimeout = 10 * time.Second
+// The documents do not set these server timeouts. They stop a client that
+// stalls while sending a request, or sits idle between requests, from holding
+// a connection open. A WebSocket is taken over from the server when it is
+// upgraded, so these do not apply to it; the WebSocket has its own idle time.
+const (
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second
+	writeTimeout      = 30 * time.Second
+	idleTimeout       = 60 * time.Second
+)
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -31,7 +38,7 @@ func main() {
 }
 
 // run parses the command line, reads the configuration, opens the database
-// and serves HTTP until the server stops.
+// and serves HTTP and WebSocket until the server stops.
 func run(args []string) error {
 	flags := flag.NewFlagSet("lobby", flag.ContinueOnError)
 	configPath := flags.String("config", "", "path to the configuration file")
@@ -53,10 +60,15 @@ func run(args []string) error {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	accountService := accounts.New(db, cfg.AccountsPerAddressPerHour)
+	hub := realtime.NewHub(realtime.DefaultSettings(cfg.Rooms), accountService, logger)
+	options := api.Options{TrustForwardedFor: cfg.TrustForwardedFor, WSURI: cfg.PublicWSURL, MOTD: cfg.MOTD}
 	server := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           api.NewHandler(cfg.TrustForwardedFor, cfg.PublicWSURL, accountService, logger),
+		Handler:           api.NewHandler(options, accountService, hub, logger),
 		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 	logger.Info("listening", "address", cfg.Listen)
 	return server.ListenAndServe()
