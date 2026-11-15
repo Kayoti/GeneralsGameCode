@@ -78,15 +78,18 @@ func (hub *Hub) handleCountdownStarted(live *connection) {
 	}
 }
 
-// handleConnectivityCheck handles message 26. The check itself comes with
-// player-to-player support; here a new 26 from the host ends the countdown lock
-// (SERVICE.md section 6.3).
+// handleConnectivityCheck handles message 26. A 26 from the host ends the
+// countdown lock (SERVICE.md section 6.3) and starts the connectivity check of
+// section 8.3, in place of one that was running. A 26 from anyone else is
+// ignored, and so is one for a lobby that has started.
 func (hub *Hub) handleConnectivityCheck(live *connection) {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
-	if lobby := hub.lobbyOf(live.player); lobby != nil {
-		lobby.EndCountdown(live.player.userID)
+	lobby := hub.lobbyOf(live.player)
+	if lobby == nil || !lobby.EndCountdown(live.player.userID) || lobby.HasStarted() {
+		return
 	}
+	hub.startMeshCheck(lobby)
 }
 
 // handleRemovePassword handles message 24.

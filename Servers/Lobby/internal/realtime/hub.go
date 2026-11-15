@@ -26,6 +26,11 @@ const (
 	// defaultWriteTimeout is not set by the documents. It stops a client that
 	// does not read from holding a writer goroutine for ever.
 	defaultWriteTimeout = 10 * time.Second
+	// defaultMeshReplyWait is how long a connectivity check waits for the
+	// members' replies, and defaultMeshRetryDelay the pause before the next
+	// attempt (SERVICE.md section 8.3).
+	defaultMeshReplyWait  = 5 * time.Second
+	defaultMeshRetryDelay = 2 * time.Second
 )
 
 // maxOutboxMessages is how many messages may wait for one client. A client
@@ -44,16 +49,22 @@ type Settings struct {
 	WriteTimeout time.Duration
 	// CountdownLock is how long a countdown (message 23) locks a lobby.
 	CountdownLock time.Duration
+	// MeshReplyWait is how long one attempt of a connectivity check waits for replies.
+	MeshReplyWait time.Duration
+	// MeshRetryDelay is the pause between two attempts of a connectivity check.
+	MeshRetryDelay time.Duration
 }
 
 // DefaultSettings returns the settings of SERVICE.md with the given room names.
 func DefaultSettings(rooms []string) Settings {
 	return Settings{
-		Rooms:         rooms,
-		IdleTimeout:   defaultIdleTimeout,
-		ReconnectHold: defaultReconnectHold,
-		WriteTimeout:  defaultWriteTimeout,
-		CountdownLock: defaultCountdownLock,
+		Rooms:          rooms,
+		IdleTimeout:    defaultIdleTimeout,
+		ReconnectHold:  defaultReconnectHold,
+		WriteTimeout:   defaultWriteTimeout,
+		CountdownLock:  defaultCountdownLock,
+		MeshReplyWait:  defaultMeshReplyWait,
+		MeshRetryDelay: defaultMeshRetryDelay,
 	}
 }
 
@@ -116,6 +127,9 @@ type Hub struct {
 	lobbies     map[int64]*lobbies.Lobby
 	nextLobbyID int64
 	nextMatchID uint64
+	// meshChecks holds the connectivity check of each lobby that has one running (SERVICE.md section 8.3).
+	meshChecks      map[int64]*meshCheck
+	nextMeshCheckID int64
 }
 
 // NewHub returns a Hub with the given settings. Room ids are given to
@@ -129,15 +143,17 @@ func NewHub(settings Settings, accounts Accounts, logger *slog.Logger) *Hub {
 		roomMembers[id] = make(map[int64]*player)
 	}
 	return &Hub{
-		settings:    settings,
-		accounts:    accounts,
-		logger:      logger,
-		rooms:       rooms,
-		players:     make(map[int64]*player),
-		roomMembers: roomMembers,
-		lobbies:     make(map[int64]*lobbies.Lobby),
-		nextLobbyID: firstLobbyID,
-		nextMatchID: firstMatchID,
+		settings:        settings,
+		accounts:        accounts,
+		logger:          logger,
+		rooms:           rooms,
+		players:         make(map[int64]*player),
+		roomMembers:     roomMembers,
+		lobbies:         make(map[int64]*lobbies.Lobby),
+		nextLobbyID:     firstLobbyID,
+		nextMatchID:     firstMatchID,
+		meshChecks:      make(map[int64]*meshCheck),
+		nextMeshCheckID: firstMeshCheckID,
 	}
 }
 

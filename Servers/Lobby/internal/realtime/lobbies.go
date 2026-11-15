@@ -85,7 +85,8 @@ func (hub *Hub) lobbyChanged(lobby *lobbies.Lobby, wasListed bool) {
 
 // leaveLobby takes a player out of their lobby as SERVICE.md section 7.4
 // says: the slot opens, an empty lobby is deleted, the remaining members get
-// 6 and the watchers get 7. The caller holds hub.mu.
+// 6 and 18 for the player who left, and the watchers get 7. A connectivity
+// check that asked the player ends. The caller holds hub.mu.
 func (hub *Hub) leaveLobby(target *player) {
 	lobby := hub.lobbyOf(target)
 	target.lobbyID = noLobby
@@ -93,10 +94,13 @@ func (hub *Hub) leaveLobby(target *player) {
 		return
 	}
 	wasListed := lobby.IsListed()
+	hub.meshMemberLeft(lobby.ID(), target.userID)
 	if lobby.Remove(target.userID) {
+		hub.cancelMeshCheck(lobby.ID())
 		delete(hub.lobbies, lobby.ID())
 	} else {
 		hub.notifyMembers(lobby)
+		hub.disconnectFromLeaver(lobby.ID(), target.userID, lobby.Humans())
 	}
 	if wasListed {
 		hub.notifyWatchers()
@@ -179,6 +183,7 @@ func (hub *Hub) JoinLobby(userID int64, lobbyID int64, request lobbies.JoinReque
 	hub.leaveLobby(joiner)
 	joiner.lobbyID = lobbyID
 	hub.lobbyChanged(lobby, wasListed)
+	hub.startJoinerSignalling(lobbyID, joiner, lobby.Humans())
 	return nil
 }
 
