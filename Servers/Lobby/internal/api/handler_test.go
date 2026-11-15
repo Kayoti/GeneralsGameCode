@@ -9,24 +9,76 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"servers-lobby/internal/accounts"
+	"servers-lobby/internal/store"
 )
 
 const testPrefix = "/env/prod/contract/1/"
 
-// testHandler returns the service handler. Its log goes to a buffer that the
-// tests do not read.
-func testHandler() http.Handler {
-	return NewHandler(false, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+// testWSURI is the ws_uri of the test service.
+const testWSURI = "ws://127.0.0.1:9000/ws"
+
+// openTestDB opens a new database file for one test.
+func openTestDB(t *testing.T) *store.Store {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "lobby.db"))
+	if err != nil {
+		t.Fatalf("store.Open returned error: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// testHandler returns the service handler on a new database, with no account
+// creation limit. Its log goes to a buffer that the tests do not read.
+func testHandler(t *testing.T) http.Handler {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	return NewHandler(false, testWSURI, accounts.New(openTestDB(t), 0), logger)
 }
 
 func perform(t *testing.T, handler http.Handler, method, path string, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	return performAs(t, handler, "", method, path, body)
+}
+
+// performAs sends a request with token in its Authorization: Bearer header.
+// An empty token sends no Authorization header.
+func performAs(t *testing.T, handler http.Handler, token string, method, path string, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	return recorder
+}
+
+// sessionFor returns a handler and a session token of a new account, got
+// through the login calls themselves (LoginCode, then CheckLogin).
+func sessionFor(t *testing.T) (http.Handler, string) {
+	t.Helper()
+	handler := testHandler(t)
+	codeAnswer := perform(t, handler, http.MethodGet, testPrefix+"LoginCode", "")
+	var code struct {
+		LoginCode string `json:"login_code"`
+	}
+	if err := json.Unmarshal(codeAnswer.Body.Bytes(), &code); err != nil || code.LoginCode == "" {
+		t.Fatalf("LoginCode answer %q gave no code: %v", codeAnswer.Body.String(), err)
+	}
+	loginAnswer := perform(t, handler, http.MethodPost, testPrefix+"CheckLogin", `{"code":"`+code.LoginCode+`"}`)
+	var login struct {
+		SessionToken string `json:"session_token"`
+	}
+	if err := json.Unmarshal(loginAnswer.Body.Bytes(), &login); err != nil || login.SessionToken == "" {
+		t.Fatalf("CheckLogin answer %q gave no session: %v", loginAnswer.Body.String(), err)
+	}
+	return handler, login.SessionToken
 }
 
 // assertJSONKeys checks that body is a JSON object with every key listed.
@@ -71,9 +123,10 @@ func TestFixedAnswers(t *testing.T) {
 		{"Matchmaking widen", http.MethodPost, testPrefix + "Matchmaking/Widen", http.StatusOK, `{}`, nil},
 		{"ProvideMWToken", http.MethodPost, testPrefix + "ProvideMWToken", http.StatusOK, `{}`, nil},
 	}
+	handler, token := sessionFor(t)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			recorder := perform(t, testHandler(), tc.method, tc.path, "")
+			recorder := performAs(t, handler, token, tc.method, tc.path, "")
 			if recorder.Code != tc.wantStatus {
 				t.Errorf("status = %d, want %d", recorder.Code, tc.wantStatus)
 			}
@@ -93,7 +146,7 @@ func TestFixedAnswers(t *testing.T) {
 func TestFixedAnswersAcceptEveryEnvironment(t *testing.T) {
 	for _, env := range []string{"prod", "test", "dev"} {
 		path := "/env/" + env + "/contract/1/VersionCheck"
-		recorder := perform(t, testHandler(), http.MethodPost, path, "{}")
+		recorder := perform(t, testHandler(t), http.MethodPost, path, "{}")
 		if recorder.Code != http.StatusOK {
 			t.Errorf("env %s: status = %d, want 200", env, recorder.Code)
 		}
@@ -113,9 +166,10 @@ func TestOtherSocialCallsAnswerEmptyObject(t *testing.T) {
 		{http.MethodDelete, testPrefix + "Social/Blocked/1001"},
 		{http.MethodPost, testPrefix + "Social/Friends"},
 	}
+	handler, token := sessionFor(t)
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			recorder := perform(t, testHandler(), tc.method, tc.path, "")
+			recorder := performAs(t, handler, token, tc.method, tc.path, "")
 			if recorder.Code != http.StatusOK || recorder.Body.String() != `{}` {
 				t.Errorf("got %d %q, want 200 {}", recorder.Code, recorder.Body.String())
 			}
@@ -142,9 +196,10 @@ func TestUnservedPathsAnswer404(t *testing.T) {
 		{"root", http.MethodGet, "/"},
 		{"health check with wrong method", http.MethodPost, "/healthz"},
 	}
+	handler, token := sessionFor(t)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			recorder := perform(t, testHandler(), tc.method, tc.path, "")
+			recorder := performAs(t, handler, token, tc.method, tc.path, "")
 			if recorder.Code != http.StatusNotFound {
 				t.Errorf("status = %d, want 404", recorder.Code)
 			}
@@ -156,7 +211,7 @@ func TestUnservedPathsAnswer404(t *testing.T) {
 }
 
 func TestHealthCheck(t *testing.T) {
-	recorder := perform(t, testHandler(), http.MethodGet, "/healthz", "")
+	recorder := perform(t, testHandler(t), http.MethodGet, "/healthz", "")
 	if recorder.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", recorder.Code)
 	}
@@ -167,7 +222,7 @@ func TestHealthCheck(t *testing.T) {
 
 func TestBodyOfExactlyTheLimitIsAccepted(t *testing.T) {
 	body := strings.Repeat("a", maxRequestBodyBytes)
-	recorder := perform(t, testHandler(), http.MethodPost, testPrefix+"VersionCheck", body)
+	recorder := perform(t, testHandler(t), http.MethodPost, testPrefix+"VersionCheck", body)
 	if recorder.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", recorder.Code)
 	}
@@ -175,7 +230,7 @@ func TestBodyOfExactlyTheLimitIsAccepted(t *testing.T) {
 
 func TestBodyOverTheLimitIsRefused(t *testing.T) {
 	body := strings.Repeat("a", maxRequestBodyBytes+1)
-	recorder := perform(t, testHandler(), http.MethodPost, testPrefix+"VersionCheck", body)
+	recorder := perform(t, testHandler(t), http.MethodPost, testPrefix+"VersionCheck", body)
 	if recorder.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("status = %d, want 413", recorder.Code)
 	}

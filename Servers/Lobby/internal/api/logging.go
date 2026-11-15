@@ -68,9 +68,8 @@ func withRequestLog(trustForwardedFor bool, logger *slog.Logger, next http.Handl
 // the service. Earlier entries come from the client and are ignored.
 func clientAddress(r *http.Request, trustForwardedFor bool) string {
 	if trustForwardedFor {
-		if forwarded := r.Header.Get(forwardedForHeader); forwarded != "" {
-			entries := strings.Split(forwarded, ",")
-			return strings.TrimSpace(entries[len(entries)-1])
+		if address := lastForwardedEntry(r.Header.Values(forwardedForHeader)); address != "" {
+			return address
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -78,6 +77,17 @@ func clientAddress(r *http.Request, trustForwardedFor bool) string {
 		return ""
 	}
 	return host
+}
+
+// lastForwardedEntry returns the last entry of the last X-Forwarded-For line.
+// A proxy may add its entry on a line of its own, so every line is considered
+// and not only the first. It returns "" when there is no entry.
+func lastForwardedEntry(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	entries := strings.Split(lines[len(lines)-1], ",")
+	return strings.TrimSpace(entries[len(entries)-1])
 }
 
 // hideLastPart removes the last part of an IP address for the log. An IPv4

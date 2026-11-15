@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"servers-lobby/internal/accounts"
 )
 
 // maxRequestBodyBytes is the largest request body the service reads (SERVICE.md section 3).
@@ -43,15 +45,30 @@ var environments = map[string]bool{
 	"dev":  true,
 }
 
-// NewHandler returns the handler of every HTTP call. trustForwardedFor says
-// whether the address in the request log is taken from X-Forwarded-For
-// (SERVICE.md section 11). Every request is logged to logger.
-func NewHandler(trustForwardedFor bool, logger *slog.Logger) http.Handler {
-	return withRequestLog(trustForwardedFor, logger, withBodyLimit(http.HandlerFunc(serve)))
+// server answers the contract calls. It holds what the calls that log in need.
+type server struct {
+	accounts          *accounts.Service
+	trustForwardedFor bool
+	wsURI             string
+	logger            *slog.Logger
 }
 
-// serve answers the health check, the contract calls, and 404 for anything else.
-func serve(w http.ResponseWriter, r *http.Request) {
+// NewHandler returns the handler of every HTTP call. trustForwardedFor says
+// whether a caller's address is taken from X-Forwarded-For (SERVICE.md section
+// 11). wsURI is returned as ws_uri at login (section 2). Every request is
+// logged to logger.
+func NewHandler(trustForwardedFor bool, wsURI string, accountService *accounts.Service, logger *slog.Logger) http.Handler {
+	routes := &server{
+		accounts:          accountService,
+		trustForwardedFor: trustForwardedFor,
+		wsURI:             wsURI,
+		logger:            logger,
+	}
+	return withRequestLog(trustForwardedFor, logger, withBodyLimit(http.HandlerFunc(routes.serve)))
+}
+
+// serve answers the health check, the login calls, the fixed calls, and 404 for anything else.
+func (routes *server) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && r.URL.Path == healthPath {
 		writeText(w, http.StatusOK, healthBody)
 		return
@@ -61,12 +78,51 @@ func serve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, emptyObject)
 		return
 	}
+	if handle, found := routes.loginCallFor(r.Method, segments); found {
+		handle(w, r)
+		return
+	}
 	answer, ok := fixedAnswerFor(r.Method, segments)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, emptyObject)
 		return
 	}
+	if answer.needsLogin && !routes.isLoggedIn(r) {
+		writeJSON(w, http.StatusUnauthorized, emptyObject)
+		return
+	}
 	writeJSON(w, answer.status, answer.body)
+}
+
+// bearerPrefix starts the Authorization header of a call that carries a token (SERVICE.md section 3).
+const bearerPrefix = "Bearer "
+
+// bearerToken returns the token of the request's Authorization: Bearer header.
+// The bool is false when there is no such header or it has no token.
+func bearerToken(r *http.Request) (string, bool) {
+	header := r.Header.Get("Authorization")
+	if !strings.HasPrefix(header, bearerPrefix) {
+		return "", false
+	}
+	token := strings.TrimPrefix(header, bearerPrefix)
+	return token, token != ""
+}
+
+// accountForRequest returns the account that the request's session token
+// belongs to. The bool is false when the request has no valid session token,
+// which SERVICE.md section 3 answers with 401.
+func (routes *server) accountForRequest(r *http.Request) (int64, bool) {
+	token, ok := bearerToken(r)
+	if !ok {
+		return 0, false
+	}
+	return routes.accounts.UserForSession(token)
+}
+
+// isLoggedIn reports whether the request carries a valid session token.
+func (routes *server) isLoggedIn(r *http.Request) bool {
+	_, ok := routes.accountForRequest(r)
+	return ok
 }
 
 // contractSegments returns the endpoint segments of a path of the form

@@ -9,13 +9,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"servers-lobby/internal/accounts"
 )
 
 // loggedRequest sends one request through the handler and returns the log text.
 func loggedRequest(t *testing.T, trustForwardedFor bool, request *http.Request) string {
 	t.Helper()
 	var logBuffer bytes.Buffer
-	handler := NewHandler(trustForwardedFor, slog.New(slog.NewTextHandler(&logBuffer, nil)))
+	logger := slog.New(slog.NewTextHandler(&logBuffer, nil))
+	handler := NewHandler(trustForwardedFor, testWSURI, accounts.New(openTestDB(t), 0), logger)
 	handler.ServeHTTP(httptest.NewRecorder(), request)
 	return logBuffer.String()
 }
@@ -65,6 +68,18 @@ func TestRequestLogUsesLastForwardedEntryWhenTrusted(t *testing.T) {
 	}
 	if strings.Contains(logText, "198.51.100") {
 		t.Errorf("log %q uses the client-supplied forwarded entry", logText)
+	}
+}
+
+func TestRequestLogUsesLastForwardedLineWhenProxyAddsOwnLine(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, testPrefix+"GlobalStats", nil)
+	request.RemoteAddr = "192.0.2.10:4444"
+	request.Header.Add("X-Forwarded-For", "198.51.100.7")
+	request.Header.Add("X-Forwarded-For", "10.0.0.2")
+	logText := loggedRequest(t, true, request)
+
+	if !strings.Contains(logText, "address=10.0.0.x") {
+		t.Errorf("log %q does not use the entry on the last forwarded line", logText)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"servers-lobby/internal/accounts"
 	"servers-lobby/internal/api"
 	"servers-lobby/internal/config"
 	"servers-lobby/internal/store"
@@ -51,9 +52,10 @@ func run(args []string) error {
 	defer db.Close()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	accountService := accounts.New(db, cfg.AccountsPerAddressPerHour)
 	server := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           api.NewHandler(cfg.TrustForwardedFor, logger),
+		Handler:           api.NewHandler(cfg.TrustForwardedFor, cfg.PublicWSURL, accountService, logger),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	logger.Info("listening", "address", cfg.Listen)
