@@ -39,7 +39,6 @@ struct S3ScreenshotEntry
 #include <atomic>
 
 #include <curl/curl.h>
-#include <sentry.h>
 #include <chrono>
 #include "GeneralsOnline_Settings.h"
 #include "GameClient/DisplayStringManager.h"
@@ -567,8 +566,7 @@ public:
 
 	void ResetPendingFullTeardownReason() { m_teardownReason = EGOTearDownReason::UNKNOWN; }
 
-	static void InitSentry();
-	static void ShutdownSentry();
+	static void InitCurl();
 private:
 		
 		

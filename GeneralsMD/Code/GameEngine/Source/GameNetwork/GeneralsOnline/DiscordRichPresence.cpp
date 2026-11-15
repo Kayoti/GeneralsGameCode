@@ -5,6 +5,7 @@
 #include "GameNetwork/GameInfo.h"
 #include "GameNetwork/GeneralsOnline/NGMPGame.h"
 #include "GameNetwork/GeneralsOnline/OnlineServices_LobbyInterface.h"
+#include "GameNetwork/GeneralsOnline/ServiceHosts.h"
 
 #include <Windows.h>
 
@@ -19,7 +20,7 @@ constexpr const char *DISCORD_APPLICATION_ID = "1354979004507226294";
 constexpr const char *LOBBY_DETAILS = "In Lobby / In Room";
 constexpr const char *LOBBY_STATE = "Waiting match";
 constexpr const char *DEFAULT_IMAGE_KEY = "generals_online";
-constexpr const char *DEFAULT_IMAGE_TEXT = "Generals Online";
+constexpr const char *DEFAULT_IMAGE_TEXT = ServiceHosts::DISPLAY_NAME;
 
 struct GeneralAsset {
   const char *side;

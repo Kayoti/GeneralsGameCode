@@ -57,6 +57,7 @@
 #include "Common/GameEngine.h"
 #include "Common/GlobalData.h"
 #include "../PluginInterfaces.h"
+#include "GameNetwork/GeneralsOnline/ServiceHosts.h"
 
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -855,7 +856,7 @@ void StartPatchCheck()
 	if (bIsARMArchitecture)
 	{
         MessageBoxOk(TheGameText->fetchOrSubstitute("GUI:NoARMSupportHeader", L"Unsupported System"),
-            TheGameText->fetchOrSubstitute("GUI:NoARMSupport", L"GeneralsOnline does not support ARM processors"),
+            TheGameText->fetchOrSubstituteFormat("GUI:NoARMSupport", L"%ls does not support ARM processors", ServiceHosts::DISPLAY_NAME_WIDE),
             CancelPatchCheckCallbackAndReopenDropdown);
 
 		return;
@@ -948,7 +949,7 @@ void StartPatchCheck()
 					{
 						// NOTE: we treat all patches as mandatory currently
 						onlineCancelWindow = MessageBoxOkCancel(TheGameText->fetch("GUI:PatchAvailable"),
-							UnicodeString(L"Press OK to begin updating.\n\nOtherwise, you can visit www.playgenerals.online to download the latest update manually."), []()
+							UnicodeString(L"Press OK to begin updating."), []()
 							{
 								WindowLayout* layout;
 								layout = TheWindowManager->winCreateLayout(AsciiString("Menus/DownloadMenu.wnd"));

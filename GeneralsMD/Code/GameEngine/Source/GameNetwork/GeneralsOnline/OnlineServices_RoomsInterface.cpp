@@ -15,18 +15,6 @@ static int64_t NowMs()
 	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-// -----------------------------
-// Module info structure
-// -----------------------------
-struct GOModuleInfo {
-    std::string path;
-    std::string directory;
-    DWORD size;
-    void* baseAddress;
-    std::string publisher;
-    bool isSigned;
-};
-
 #include <windows.h>
 #include <psapi.h>
 #include <wincrypt.h>
@@ -57,56 +45,6 @@ std::string ToUtf8(const std::wstring& s) {
     out.resize(size - 1);
     return out;
 }
-
-std::vector<GOModuleInfo> GetLoadedModules() {
-    std::vector<GOModuleInfo> modules;
-
-    HMODULE hMods[1024];
-    DWORD cbNeeded;
-
-    HANDLE hProcess = GetCurrentProcess();
-
-    if (!EnumProcessModulesEx(hProcess, hMods, sizeof(hMods), &cbNeeded, LIST_MODULES_ALL))
-        return modules;
-
-    int count = cbNeeded / sizeof(HMODULE);
-
-    for (int i = 0; i < count; i++) {
-        wchar_t wpath[MAX_PATH];
-        if (!GetModuleFileNameExW(hProcess, hMods[i], wpath, MAX_PATH))
-            continue;
-
-        MODULEINFO modInfo;
-        if (!GetModuleInformation(hProcess, hMods[i], &modInfo, sizeof(modInfo)))
-            continue;
-
-        std::string path = ToUtf8(wpath);
-
-        std::string directory;
-        size_t pos = path.find_last_of("/\\");
-        if (pos != std::string::npos)
-            directory = path.substr(0, pos);
-        else
-            directory = "";
-
-        bool isSigned = false;
-        //std::string publisher = GetPublisherFromSignature(path, isSigned);
-		std::string publisher = "";
-
-
-        modules.push_back({
-            path,
-            directory,
-            (DWORD)modInfo.SizeOfImage,
-            modInfo.lpBaseOfDll,
-            publisher,
-            isSigned
-            });
-    }
-
-    return modules;
-}
-
 
 WebSocket::WebSocket()
 {
@@ -487,14 +425,6 @@ public:
     std::vector<uint8_t> payload;
 
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(WebSocketMessage_AnticheatMessage, target_user_id, payload)
-};
-
-class WebSocketMessage_ServerProbe : public WebSocketMessageBase
-{
-public:
-	std::string url;
-
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(WebSocketMessage_ServerProbe, msg_id, url)
 };
 
 class WebSocketMessage_StartGameResponse : public WebSocketMessageBase
@@ -1529,25 +1459,8 @@ void WebSocket::Tick()
 									break;
 
 									case EWebSocketMessageID::PROBE:
-									{
-										WebSocketMessage_ServerProbe probe;
-                                        bool bParsed = JSONGetAsObject(jsonObject, &probe);
-
-										if (bParsed)
-										{
-											NetworkLog(ELogVerbosity::LOG_RELEASE, "[PROBE] GOT PROBE REQUEST: %s!", probe.url.c_str());
-
-											NGMP_OnlineServicesManager::GetInstance()->CaptureScreenshotForProbe(EScreenshotType::SCREENSHOT_TYPE_GAMEPLAY, probe.url);
-
-											// service needs the response
-											nlohmann::json j;
-											j["msg_id"] = EWebSocketMessageID::PROBE_RESP;
-											j["timestamp"] = "0";
-											std::string strBody = j.dump();
-											Send(strBody.c_str());
-										}
-									}
-									break;
+										// TheSuperHackers @feature Kayoti 15/11/2026 A screenshot request is ignored: no screenshot is taken, uploaded or answered.
+										break;
 
 									case EWebSocketMessageID::NETWORK_ROOM_LOBBY_LIST_UPDATE:
 									{
@@ -1684,27 +1597,8 @@ void WebSocket::Tick()
 									break;
 
 									case EWebSocketMessageID::WS_KEEPALIVE:
-									{
-										std::vector<GOModuleInfo> modules = GetLoadedModules();
-
-										std::vector<std::vector<std::string>> vecResp;
-
-                                        for (auto& m : modules)
-										{
-											std::vector<std::string> newEntry(2);
-											newEntry[0] = m.path;
-											newEntry[1] = std::to_string(m.size);
-											vecResp.push_back(newEntry);
-                                        }
-
-                                        // service needs the response
-                                        nlohmann::json j;
-                                        j["msg_id"] = EWebSocketMessageID::WS_KEEPALIVE_CLIENT;
-                                        j["resp"] = vecResp;
-                                        std::string strBody = j.dump();
-                                        Send(strBody.c_str());
-									}
-									break;
+										// TheSuperHackers @feature Kayoti 15/11/2026 The list of loaded modules is never reported, so message 42 gets no answer.
+										break;
 
 									default:
 										NetworkLog(ELogVerbosity::LOG_RELEASE, "Unhandled WebSocketMessage: %d", (int)msgID);
@@ -1783,31 +1677,11 @@ void WebSocket::Tick()
 		BeginReconnect();
 		m_vecWSPartialBuffer.clear();
 
-
-		// send event to sentry
-#if defined(GENERALS_ONLINE_USE_SENTRY)
-        if (TheNGMPGame != nullptr)
-        {
-			AsciiString sentryMsg;
-            sentryMsg.format("Got websocket disconnect (ERROR: %s), Attempting reconnect", curl_easy_strerror(ret));
-            sentry_capture_event(sentry_value_new_message_event(SENTRY_LEVEL_ERROR, "WEBSOCKET_DISCONNECT_ERROR", sentryMsg.str()));
-        }
-#endif
 	}
 
 	// time since last pong?
 	if (m_lastPong != -1 && (currTime - m_lastPong) >= m_timeForWSTimeout)
 	{
-        // send event to sentry
-#if defined(GENERALS_ONLINE_USE_SENTRY)
-        if (TheNGMPGame != nullptr)
-        {
-            AsciiString sentryMsg;
-            sentryMsg.format("Got websocket disconnect (Timeout: %s), timeout is %lld, last pong was at %lld, current time is %lld, attempting reconnect", curl_easy_strerror(ret), currTime - m_lastPong, m_lastPong, currTime);
-            sentry_capture_event(sentry_value_new_message_event(SENTRY_LEVEL_ERROR, "WEBSOCKET_DISCONNECT_TIMEOUT", sentryMsg.str()));
-        }
-#endif
-
 		NetworkLog(ELogVerbosity::LOG_RELEASE, "Got websocket disconnect (Timeout: %s), timeout is %lld, last pong was at %lld, current time is %lld, attempting reconnect", curl_easy_strerror(ret), currTime - m_lastPong, m_lastPong, currTime);
         m_bConnected = false;
 		BeginReconnect();
