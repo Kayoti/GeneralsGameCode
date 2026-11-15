@@ -1,6 +1,6 @@
 # C1 Client: relay link, entry check and region file, carried over
 
-State: todo
+State: done
 Branch: servers-go-C1
 
 ## Goal
@@ -34,12 +34,12 @@ Bring the three finished, engine-independent client pieces over from the `server
 
 ## Done when
 
-- [ ] The six source files and `cmake/enet.cmake` are taken from `servers` unchanged, in one commit.
-- [ ] The build file changes are re-applied by hand so that, with the switch on, ENet is fetched at the pinned version and `core_serverlink` builds and links into the Zero Hour engine library. With the switch off none of it is built or fetched.
-- [ ] The headers stay free of ENet and engine types, as on `servers`.
-- [ ] The client builds with the switch on and with it off. V1 is re-confirmed on this base, or the exact clash is recorded and the package stops as `partial`.
-- [ ] No source change was needed to the six files. If one was, it is a separate commit and explained in the handoff notes.
-- [ ] The checks for this program in STANDARDS.md, "Before a package is done", pass.
+- [x] The six source files and `cmake/enet.cmake` are taken from `servers` unchanged, in one commit.
+- [x] The build file changes are re-applied by hand so that, with the switch on, ENet is fetched at the pinned version and `core_serverlink` builds and links into the Zero Hour engine library. With the switch off none of it is built or fetched.
+- [x] The headers stay free of ENet and engine types, as on `servers`.
+- [x] The client builds with the switch on and with it off. V1 is re-confirmed on this base, or the exact clash is recorded and the package stops as `partial`.
+- [x] No source change was needed to the six files. If one was, it is a separate commit and explained in the handoff notes.
+- [x] The checks for this program in STANDARDS.md, "Before a package is done", pass.
 - [ ] Reviewed by someone other than the author.
 
 ## Out of scope
@@ -49,6 +49,19 @@ Bring the three finished, engine-independent client pieces over from the `server
 ## Handoff notes
 
 - Finished:
+  - Commit `96ec88407`: `cmake/enet.cmake` and the six sources (`ServerLink`, `ServerEntryCheck`, `ServerRegions`; `.h` in `Core/GameEngine/Include/GameNetwork/`, `.cpp` in `Core/GameEngine/Source/GameNetwork/`) taken from `servers` with `git checkout servers -- <path>`. `git diff servers -- <path>` is empty for all seven.
+  - Commit `f22eafcb3`: `include(cmake/enet.cmake)` after `gamespy.cmake` in the root `CMakeLists.txt`, and the `core_serverlink` static library in `Core/GameEngine/CMakeLists.txt`, inside `if(RTS_BUILD_OPTION_SERVERS)`, linked into `corei_gameengine_public`. Same block as on `servers`: no precompiled header, ENet, `ws2_32` and `winmm` linked privately. `enet.cmake` returns at once with the switch off.
+  - The headers include only each other. No ENet or engine includes.
+- Evidence (x86 `cmd` session, target `z_generals`):
+  - Switch on: configure, Release build and Debug build all exit 0. ENet is fetched (`build/win32-vcpkg-servers/_deps/enet-build/{Release,Debug}/enet.lib`). `core_serverlink.lib` is built in both configurations. The Release link line of `GeneralsOnlineZH.exe` holds `core_serverlink.lib`, `enet.lib`, `ws2_32.lib` and `winmm.lib`.
+  - Switch off: configure and Release build exit 0. `build/win32-vcpkg/_deps` has no `enet` folder and `build-Release.ninja` has no `serverlink` or `enet` entry.
+  - V1 re-confirmed on this base (which also links GameNetworkingSockets and curl): ENet 1.3.18 builds and links with Visual Studio 18 build tools, x86, Debug and Release, and the engine builds with it.
 - Left to do:
+  - Lint: `scripts/run-clang-tidy.py` not run. The sources are unchanged from `servers`, where they compiled with `/W4` without warnings. The build log has no warning naming the three files.
+  - The reviewer box stays unticked.
+  - Nothing calls the link yet, so the linker drops it: the switch-on and switch-off Release executables have the same size (14425088 bytes). That is expected until C2 and D1 use it.
 - Surprises and open questions:
+  - The archive notes also list the `ConnectionManager` and `Network` server-mode flag. On this branch that is C2's, so it was not carried here.
+  - The rest of the archive notes still apply to C2 and D1: the pass is 100 bytes; PROTOCOL.md gives no deadline for CREATE and JOIN, so `timeoutMs` is a parameter; keep one ENet user initialised at a time; call `ServerEntryCheck::update` every frame.
+  - `regions.txt` has no defined place next to the installed game yet.
 - Review findings and fixes:
