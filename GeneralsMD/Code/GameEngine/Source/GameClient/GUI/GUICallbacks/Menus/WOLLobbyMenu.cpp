@@ -335,6 +335,11 @@ void SetLobbyAttemptHostJoin(Bool start)
 	s_tryingToHostOrJoin = start;
 }
 
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 15/11/2026 True only while the Join press is sent again after its entry check passed.
+static Bool s_serversJoinCheckPassed = FALSE;
+#endif
+
 // Tooltips -------------------------------------------------------------------------------
 
 static void playerTooltip(GameWindow *window,
@@ -1770,6 +1775,27 @@ void ExitState()
 	TheShell->pop();
 }
 
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 15/11/2026 Acts on the result of an entry check started by a join, or by Accept or exit in the staging room.
+static void updateServersGate()
+{
+	ServersGate action = SERVERS_GATE_NONE;
+	const UnsignedInt handled = SERVERS_GATE_JOIN | SERVERS_GATE_ACCEPT | SERVERS_GATE_EXIT;
+	const ServersGateResult result = ServersGateUpdate(handled, &action);
+
+	if (result == SERVERS_GATE_REFUSED)
+	{
+		ServersLogoutOnline();
+	}
+	else if (result == SERVERS_GATE_PASSED && action == SERVERS_GATE_JOIN && buttonJoin != nullptr)
+	{
+		s_serversJoinCheckPassed = TRUE;
+		TheWindowManager->winSendSystemMsg(parent, GBM_SELECTED, (WindowMsgData)buttonJoin, buttonJoinID);
+		s_serversJoinCheckPassed = FALSE;
+	}
+}
+#endif
+
 //-------------------------------------------------------------------------------------------------
 /** WOL Lobby Menu update method */
 //-------------------------------------------------------------------------------------------------
@@ -1787,6 +1813,11 @@ void WOLLobbyMenuUpdate( WindowLayout * layout, void *userData)
 
 		return;
 	}
+
+#ifdef RTS_SERVERS
+	if (ServersModeIsOn())
+		updateServersGate();
+#endif
 
 	if(justEntered)
 	{
@@ -2495,6 +2526,16 @@ WindowMsgHandledType WOLLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 							// TODO_NGMP: Enforce this on the host too, vanilla game did not...
 
 							
+#ifdef RTS_SERVERS
+							// TheSuperHackers @feature Kayoti 15/11/2026 In Servers mode a join, with or without a password, first runs the entry check (PROTOCOL.md 4.4). On a pass the press is sent again.
+							if (ServersModeIsOn() && !s_serversJoinCheckPassed)
+							{
+								if (!ServersGateIsPending() && !ServersGateStart(SERVERS_GATE_JOIN))
+									ServersLogoutOnline();
+								break;
+							}
+#endif
+
 							pLobbyInterface->SetLobbyTryingToJoin(Lobby);
 
 							if (Lobby.passworded)

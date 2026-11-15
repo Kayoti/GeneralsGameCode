@@ -73,6 +73,9 @@
 #include <cmath>
 #include "../OnlineServices_Init.h"
 #include "GameLogic/GameLogic.h"
+#ifdef RTS_SERVERS
+#include "GameNetwork/ServersMode.h"
+#endif
 NGMPGame* TheNGMPGame = NULL;
 
 void WOLDisplaySlotList( void );
@@ -201,6 +204,11 @@ static NameKeyType textEntryChatID = NAMEKEY_INVALID;
 static NameKeyType textEntryMapDisplayID = NAMEKEY_INVALID;
 static NameKeyType buttonBackID = NAMEKEY_INVALID;
 static NameKeyType buttonStartID = NAMEKEY_INVALID;
+
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 15/11/2026 True only while the Accept press is sent again after its entry check passed.
+static Bool s_serversAcceptCheckPassed = FALSE;
+#endif
 static NameKeyType buttonEmoteID = NAMEKEY_INVALID;
 static NameKeyType buttonSelectMapID = NAMEKEY_INVALID;
 static NameKeyType windowMapID = NAMEKEY_INVALID;
@@ -2465,6 +2473,26 @@ static void fillPlayerInfo(const PeerResponse *resp, PlayerInfo *info)
 	info->m_preorder	= resp->player.preorder;
 }
 
+#ifdef RTS_SERVERS
+// TheSuperHackers @feature Kayoti 15/11/2026 Acts on the result of the entry check started by Accept. The check started by exit is handled by the lobby list.
+static void updateServersGate()
+{
+	ServersGate action = SERVERS_GATE_NONE;
+	const ServersGateResult result = ServersGateUpdate(SERVERS_GATE_ACCEPT, &action);
+
+	if (result == SERVERS_GATE_REFUSED)
+	{
+		ServersLogoutOnline();
+	}
+	else if (result == SERVERS_GATE_PASSED && buttonStart != nullptr)
+	{
+		s_serversAcceptCheckPassed = TRUE;
+		TheWindowManager->winSendSystemMsg(parentWOLGameSetup, GBM_SELECTED, (WindowMsgData)buttonStart, buttonStartID);
+		s_serversAcceptCheckPassed = FALSE;
+	}
+}
+#endif
+
 //-------------------------------------------------------------------------------------------------
 /** Lan Game Options menu update method */
 //-------------------------------------------------------------------------------------------------
@@ -2487,6 +2515,11 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 			return;
 		}
 	}
+
+#ifdef RTS_SERVERS
+	if (ServersModeIsOn())
+		updateServersGate();
+#endif
 	
 	// We'll only be successful if we've requested to
 	if(isShuttingDown && TheShell->isAnimFinished() && TheTransitionHandler->isFinished())
@@ -4100,6 +4133,12 @@ WindowMsgHandledType WOLGameSetupMenuSystem( GameWindow *window, UnsignedInt msg
 					
 					PopBackToLobby();
 
+#ifdef RTS_SERVERS
+					// TheSuperHackers @feature Kayoti 15/11/2026 In Servers mode the lobby is left at once, then the entry check runs (PROTOCOL.md 4.4). The lobby list acts on a refusal.
+					if (ServersModeIsOn() && !ServersGateStart(SERVERS_GATE_EXIT))
+						ServersLogoutOnline();
+#endif
+
 				}
 				else if ( controlID == buttonCommunicatorID )
 				{
@@ -4148,6 +4187,16 @@ WindowMsgHandledType WOLGameSetupMenuSystem( GameWindow *window, UnsignedInt msg
 					}
 					else
 					{
+#ifdef RTS_SERVERS
+						// TheSuperHackers @feature Kayoti 15/11/2026 In Servers mode a member's Accept first runs the entry check (PROTOCOL.md 4.4). On a pass the press is sent again.
+						if (ServersModeIsOn() && !s_serversAcceptCheckPassed)
+						{
+							if (!ServersGateIsPending() && !ServersGateStart(SERVERS_GATE_ACCEPT))
+								ServersLogoutOnline();
+							break;
+						}
+#endif
+
 						//I'm the Client... send an accept message to the host.
 						auto game = pLobbyInterface->GetCurrentGame();
 						if (game == nullptr)
