@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"servers-lobby/internal/accounts"
+	"servers-lobby/internal/realtime"
 )
 
 // maxRequestBodyBytes is the largest request body the service reads (SERVICE.md section 3).
@@ -45,32 +46,49 @@ var environments = map[string]bool{
 	"dev":  true,
 }
 
-// server answers the contract calls. It holds what the calls that log in need.
+// Options holds the configuration values the HTTP layer needs (SERVICE.md section 11).
+type Options struct {
+	// TrustForwardedFor says whether a caller's address is taken from X-Forwarded-For.
+	TrustForwardedFor bool
+	// WSURI is returned as ws_uri at login (section 2).
+	WSURI string
+	// MOTD is the text of GET MOTD.
+	MOTD string
+}
+
+// server answers the contract calls. It holds what the calls need.
 type server struct {
 	accounts          *accounts.Service
+	hub               *realtime.Hub
 	trustForwardedFor bool
 	wsURI             string
+	motd              string
 	logger            *slog.Logger
 }
 
-// NewHandler returns the handler of every HTTP call. trustForwardedFor says
-// whether a caller's address is taken from X-Forwarded-For (SERVICE.md section
-// 11). wsURI is returned as ws_uri at login (section 2). Every request is
-// logged to logger.
-func NewHandler(trustForwardedFor bool, wsURI string, accountService *accounts.Service, logger *slog.Logger) http.Handler {
+// NewHandler returns the handler of every HTTP call and of the WebSocket
+// upgrade at /ws. Every request is logged to logger.
+func NewHandler(options Options, accountService *accounts.Service, hub *realtime.Hub, logger *slog.Logger) http.Handler {
 	routes := &server{
 		accounts:          accountService,
-		trustForwardedFor: trustForwardedFor,
-		wsURI:             wsURI,
+		hub:               hub,
+		trustForwardedFor: options.TrustForwardedFor,
+		wsURI:             options.WSURI,
+		motd:              options.MOTD,
 		logger:            logger,
 	}
-	return withRequestLog(trustForwardedFor, logger, withBodyLimit(http.HandlerFunc(routes.serve)))
+	return withRequestLog(options.TrustForwardedFor, logger, withBodyLimit(http.HandlerFunc(routes.serve)))
 }
 
-// serve answers the health check, the login calls, the fixed calls, and 404 for anything else.
+// serve answers the health check, the WebSocket upgrade, the login calls, the
+// calls that return configuration, the fixed calls, and 404 for anything else.
 func (routes *server) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && r.URL.Path == healthPath {
 		writeText(w, http.StatusOK, healthBody)
+		return
+	}
+	if r.URL.Path == webSocketPath {
+		routes.serveWebSocket(w, r)
 		return
 	}
 	segments, ok := contractSegments(r.URL.Path)
@@ -79,6 +97,10 @@ func (routes *server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if handle, found := routes.loginCallFor(r.Method, segments); found {
+		handle(w, r)
+		return
+	}
+	if handle, found := routes.infoCallFor(r.Method, segments); found {
 		handle(w, r)
 		return
 	}

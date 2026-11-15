@@ -50,7 +50,7 @@ func sendRequest(t *testing.T, handler http.Handler, testReq testRequest) *httpt
 func newLoginHandler(t *testing.T, trustForwardedFor bool, limit int) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	return NewHandler(trustForwardedFor, testWSURI, accounts.New(openTestDB(t), limit), logger)
+	return buildHandler(Options{TrustForwardedFor: trustForwardedFor, WSURI: testWSURI}, accounts.New(openTestDB(t), limit), logger)
 }
 
 // decodeAnswer decodes a JSON object body into a map of its keys.

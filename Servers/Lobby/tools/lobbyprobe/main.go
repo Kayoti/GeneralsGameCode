@@ -1,8 +1,9 @@
 // Command lobbyprobe checks the login calls of a running lobby service the way
 // the game client calls them (SERVICE.md section 13). It runs VersionCheck,
-// LoginCode, CheckLogin, RefreshToken and LoginWithToken in that order, prints
-// one line per step, and exits with status 1 at the first step that fails.
-// It never prints a token.
+// LoginCode, CheckLogin, RefreshToken and LoginWithToken in that order, then
+// connects the WebSocket for two accounts, joins room 1, exchanges a chat line
+// and changes a name. It prints one line per step, and exits with status 1 at
+// the first step that fails. It never prints a token.
 //
 // Usage: lobbyprobe --url <base address> --env <environment>
 // For example: lobbyprobe --url http://127.0.0.1:9000 --env dev
@@ -39,6 +40,7 @@ const maxAnswerBytes = 1 << 20
 // probe holds the state that the steps pass to each other.
 type probe struct {
 	client   *http.Client
+	baseURL  string
 	contract string
 	out      io.Writer
 	code     string
@@ -61,6 +63,7 @@ func main() {
 func run(baseURL string, env string, out io.Writer) error {
 	p := &probe{
 		client:   &http.Client{Timeout: requestTimeout},
+		baseURL:  strings.TrimSuffix(baseURL, "/"),
 		contract: fmt.Sprintf("%s/env/%s/contract/1", strings.TrimSuffix(baseURL, "/"), env),
 		out:      out,
 	}
@@ -70,6 +73,7 @@ func run(baseURL string, env string, out io.Writer) error {
 		p.checkLogin,
 		p.refreshToken,
 		p.loginWithToken,
+		p.webSocketRoom,
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {
