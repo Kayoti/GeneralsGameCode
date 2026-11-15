@@ -16,6 +16,9 @@ const (
 	msgLobbyCurrentUpdate = 6
 	msgLobbyListUpdate    = 7
 	msgStartGame          = 13
+	msgMeshCheckBegin     = 26
+	msgMeshCheckReply     = 27
+	msgMeshCheckComplete  = 28
 )
 
 // slotCount is the number of member entries of a lobby (SERVICE.md section 7.1).
@@ -160,13 +163,17 @@ func requireDetailMembers(answer map[string]any) error {
 	return nil
 }
 
-// readyAndStart has the guest ready up, checks that the host sees it, has the
-// host start the match and waits for message 13 at both accounts.
+// readyAndStart has the guest ready up, checks that the host sees it, runs the
+// connectivity check, has the host start the match and waits for message 13
+// at both accounts.
 func (p *probe) readyAndStart(host *account, guest *account, lobbyID int64) error {
 	if err := guest.send(map[string]any{"msg_id": msgMarkReady, "ready": true}); err != nil {
 		return err
 	}
 	if err := p.requireGuestReady(host, lobbyID); err != nil {
+		return err
+	}
+	if err := p.connectivityCheck(host, guest); err != nil {
 		return err
 	}
 	if err := host.send(map[string]any{"msg_id": msgStartGame}); err != nil {
@@ -182,6 +189,46 @@ func (p *probe) readyAndStart(host *account, guest *account, lobbyID int64) erro
 		}
 	}
 	return nil
+}
+
+// connectivityCheck has the host begin the check (message 26), has both
+// accounts answer message 27 as clients that are connected to each other, and
+// waits for message 28 at the host. Only mesh_complete true lets the host start.
+func (p *probe) connectivityCheck(host *account, guest *account) error {
+	if err := host.send(map[string]any{"msg_id": msgMeshCheckBegin}); err != nil {
+		return err
+	}
+	for _, member := range []*account{host, guest} {
+		peer := guest
+		if member == guest {
+			peer = host
+		}
+		request, err := member.await(msgMeshCheckReply, nil)
+		if err != nil {
+			return err
+		}
+		if err := requireKeys(request, "mesh_check_id", "attempt"); err != nil {
+			return err
+		}
+		reply := map[string]any{
+			"msg_id":           msgMeshCheckReply,
+			"mesh_check_id":    request["mesh_check_id"],
+			"attempt":          request["attempt"],
+			"connectivity_map": []float64{peer.userID},
+			"connecting_map":   []float64{},
+		}
+		if err := member.send(reply); err != nil {
+			return err
+		}
+	}
+	complete, err := host.await(msgMeshCheckComplete, nil)
+	if err != nil {
+		return err
+	}
+	if complete["mesh_complete"] != true {
+		return fmt.Errorf("the connectivity check did not pass: %v", complete)
+	}
+	return p.report("Connectivity check: ok, both accounts connected, message 28 reports mesh_complete")
 }
 
 // requireGuestReady waits for a notice at the host, reads the lobby as the
